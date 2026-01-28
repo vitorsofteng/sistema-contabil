@@ -1,0 +1,82 @@
+version: '3.8'
+
+# =============================================================================
+# DOCKER COMPOSE - PRODUÇÃO
+# =============================================================================
+# Use este arquivo para deploy em produção
+# docker-compose -f docker-compose.prod.yml up -d
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: contabil-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-contabil}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-contabil123}
+      POSTGRES_DB: ${POSTGRES_DB:-contabil_db}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-contabil} -d ${POSTGRES_DB:-contabil_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - contabil-network
+
+  # Backend API
+  backend:
+    build: ./backend
+    container_name: contabil-backend
+    restart: always
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PYTHONPATH=/app
+      - USE_POSTGRES=true
+      - POSTGRES_USER=${POSTGRES_USER:-contabil}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-contabil123}
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=${POSTGRES_DB:-contabil_db}
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-contabil}:${POSTGRES_PASSWORD:-contabil123}@postgres:5432/${POSTGRES_DB:-contabil_db}
+      - JWT_SECRET=${JWT_SECRET:-sua-chave-secreta-producao}
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-}
+      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET:-}
+      - ENV=production
+    volumes:
+      - backend-data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - contabil-network
+
+  # Frontend - Produção com Nginx
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: contabil-frontend
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - backend
+    networks:
+      - contabil-network
+
+networks:
+  contabil-network:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  backend-data:

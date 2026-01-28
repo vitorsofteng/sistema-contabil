@@ -1,0 +1,102 @@
+# ==============================================================================
+# Docker Compose - HOMOLOGAÇÃO (STAGING)
+# ==============================================================================
+# Uso: docker-compose -f docker-compose.staging.yml up -d
+
+version: '3.8'
+
+services:
+  # ============================================================================
+  # BACKEND API
+  # ============================================================================
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: contabil-backend-staging
+    restart: unless-stopped
+    env_file:
+      - .env.staging
+    environment:
+      - ENVIRONMENT=staging
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - contabil-staging
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ============================================================================
+  # FRONTEND
+  # ============================================================================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: contabil-frontend-staging
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    networks:
+      - contabil-staging
+
+  # ============================================================================
+  # BANCO DE DADOS
+  # ============================================================================
+  db:
+    image: postgres:15-alpine
+    container_name: contabil-db-staging
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-contabil}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-staging_password}
+      POSTGRES_DB: ${DB_NAME:-contabil_staging}
+    volumes:
+      - postgres_staging_data:/var/lib/postgresql/data
+    networks:
+      - contabil-staging
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-contabil}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ============================================================================
+  # REDIS (Cache)
+  # ============================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: contabil-redis-staging
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_staging_data:/data
+    networks:
+      - contabil-staging
+
+# ==============================================================================
+# VOLUMES
+# ==============================================================================
+volumes:
+  postgres_staging_data:
+    driver: local
+  redis_staging_data:
+    driver: local
+
+# ==============================================================================
+# NETWORKS
+# ==============================================================================
+networks:
+  contabil-staging:
+    driver: bridge

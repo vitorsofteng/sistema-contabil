@@ -1,0 +1,63 @@
+[run]
+# Diretórios para medir cobertura
+source = .
+branch = True
+parallel = True
+
+# Arquivos/diretórios para ignorar
+omit =
+    */tests/*
+    */__pycache__/*
+    */migrations/*
+    */alembic/*
+    */.venv/*
+    */venv/*
+    setup.py
+    conftest.py
+
+[report]
+# Nível mínimo de cobertura
+fail_under = 50
+
+# Excluir linhas específicas
+exclude_lines =
+    # Padrões comuns de exclusão
+    pragma: no cover
+    def __repr__
+    def __str__
+    raise AssertionError
+    raise NotImplementedError
+    if __name__ == .__main__.:
+    if TYPE_CHECKING:
+    if typing.TYPE_CHECKING:
+    @abstract
+    @abstractmethod
+    
+    # Linhas de debug
+    logger\.debug
+    logging\.debug
+
+# Mostrar linhas não cobertas
+show_missing = True
+
+# Precisão de porcentagem
+precision = 2
+
+# Ordenar por cobertura
+sort = Cover
+
+[html]
+# Diretório do relatório HTML
+directory = htmlcov
+
+# Título do relatório
+title = Sistema Contábil - Cobertura de Código
+
+[xml]
+# Arquivo de saída XML
+output = coverage.xml
+
+[json]
+# Arquivo de saída JSON
+output = coverage.json
+pretty_print = True
