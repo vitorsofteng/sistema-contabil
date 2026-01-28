@@ -1,105 +1,171 @@
-# ============================================================================
-# Makefile - Sistema Contábil
-# ============================================================================
+# ============================================
+# MAKEFILE - Sistema Contábil
+# ============================================
 
-.PHONY: help install test test-unit test-cov lint clean docker-up docker-down
+.PHONY: help dev up down logs test lint build deploy-staging deploy-prod backup migrate clean
+
+# Cores para output
+GREEN  := \033[0;32m
+YELLOW := \033[0;33m
+RED    := \033[0;31m
+NC     := \033[0m
 
 # Variáveis
-PYTHON = python3
-PIP = pip3
-PYTEST = pytest
+ENV ?= development
 DOCKER_COMPOSE = docker-compose
+DOCKER_COMPOSE_STAGING = docker-compose -f docker-compose.staging.yml
+DOCKER_COMPOSE_PROD = docker-compose -f docker-compose.prod.yml
 
-# Ajuda
-help:
-	@echo "============================================"
-	@echo "  Sistema Contábil - Comandos Disponíveis"
-	@echo "============================================"
+# ============================================
+# HELP
+# ============================================
+help: ## Mostra esta ajuda
 	@echo ""
-	@echo "  make install      - Instala dependências"
-	@echo "  make test         - Executa todos os testes"
-	@echo "  make test-unit    - Executa testes unitários"
-	@echo "  make test-cov     - Executa testes com cobertura"
-	@echo "  make lint         - Verifica estilo de código"
-	@echo "  make clean        - Remove arquivos temporários"
-	@echo "  make docker-up    - Inicia containers Docker"
-	@echo "  make docker-down  - Para containers Docker"
+	@echo "$(GREEN)Sistema Contábil - Comandos Disponíveis$(NC)"
+	@echo ""
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(YELLOW)%-20s$(NC) %s\n", $$1, $$2}'
 	@echo ""
 
-# Instalação
-install:
-	cd backend && $(PIP) install -r requirements.txt --break-system-packages
+# ============================================
+# DESENVOLVIMENTO
+# ============================================
+dev: ## Inicia ambiente de desenvolvimento com hot-reload
+	@echo "$(GREEN)🚀 Iniciando ambiente de desenvolvimento...$(NC)"
+	$(DOCKER_COMPOSE) up -d
+	@echo "$(GREEN)✅ Ambiente pronto!$(NC)"
+	@echo "   Frontend: http://localhost:3000"
+	@echo "   Backend:  http://localhost:8000"
+	@echo "   API Docs: http://localhost:8000/docs"
 
-install-dev: install
-	cd backend && $(PIP) install pytest pytest-cov pytest-asyncio httpx black flake8 --break-system-packages
+up: ## Sobe os containers
+	$(DOCKER_COMPOSE) up -d
 
-# Testes
-test:
-	cd backend && ENVIRONMENT=testing RATE_LIMIT_ENABLED=false $(PYTEST) tests/ -v
-
-test-unit:
-	cd backend && ENVIRONMENT=testing RATE_LIMIT_ENABLED=false $(PYTEST) tests/ -v -m "unit or not integration"
-
-test-cov:
-	cd backend && ENVIRONMENT=testing RATE_LIMIT_ENABLED=false $(PYTEST) tests/ \
-		--cov=core \
-		--cov=api \
-		--cov=engine \
-		--cov=data \
-		--cov-report=term-missing \
-		--cov-report=html \
-		-v
-
-test-security:
-	cd backend && ENVIRONMENT=testing RATE_LIMIT_ENABLED=false $(PYTEST) tests/test_security*.py -v
-
-test-auth:
-	cd backend && ENVIRONMENT=testing RATE_LIMIT_ENABLED=false $(PYTEST) tests/test_auth.py -v
-
-test-fast:
-	cd backend && ENVIRONMENT=testing RATE_LIMIT_ENABLED=false $(PYTEST) tests/ -v --tb=short -q
-
-# Linting
-lint:
-	cd backend && flake8 api core engine data --max-line-length=120
-
-format:
-	cd backend && black api core engine data tests --line-length=120
-
-# Limpeza
-clean:
-	find . -type f -name "*.pyc" -delete
-	find . -type d -name "__pycache__" -delete
-	find . -type d -name ".pytest_cache" -delete
-	find . -type f -name ".coverage" -delete
-	find . -type d -name "htmlcov" -exec rm -rf {} +
-	find . -type f -name "test_*.db" -delete
-	rm -f backend/test_contabil.db
-
-# Docker
-docker-up:
-	$(DOCKER_COMPOSE) up -d --build
-
-docker-down:
+down: ## Para os containers
 	$(DOCKER_COMPOSE) down
 
-docker-logs:
-	$(DOCKER_COMPOSE) logs -f
-
-docker-restart:
+restart: ## Reinicia os containers
 	$(DOCKER_COMPOSE) restart
 
-# Banco de dados
-db-migrate:
-	cd backend && alembic upgrade head
+logs: ## Mostra logs em tempo real
+	$(DOCKER_COMPOSE) logs -f
 
-db-rollback:
-	cd backend && alembic downgrade -1
+logs-backend: ## Mostra logs do backend
+	$(DOCKER_COMPOSE) logs -f backend
 
-# Desenvolvimento
-dev:
-	cd backend && uvicorn api.main:app --reload --host 0.0.0.0 --port 8000
+logs-frontend: ## Mostra logs do frontend
+	$(DOCKER_COMPOSE) logs -f frontend
 
-# Produção
-prod:
-	cd backend && uvicorn api.main:app --host 0.0.0.0 --port 8000 --workers 4
+shell-backend: ## Abre shell no container backend
+	$(DOCKER_COMPOSE) exec backend bash
+
+shell-db: ## Abre psql no container do banco
+	$(DOCKER_COMPOSE) exec db psql -U contabil -d contabil
+
+# ============================================
+# TESTES
+# ============================================
+test: ## Executa todos os testes
+	@echo "$(GREEN)🧪 Executando testes...$(NC)"
+	$(DOCKER_COMPOSE) exec backend pytest tests/ -v
+
+test-cov: ## Executa testes com cobertura
+	@echo "$(GREEN)🧪 Executando testes com cobertura...$(NC)"
+	$(DOCKER_COMPOSE) exec backend pytest tests/ -v --cov=. --cov-report=html
+	@echo "$(GREEN)📊 Relatório em backend/htmlcov/index.html$(NC)"
+
+# ============================================
+# QUALIDADE DE CÓDIGO
+# ============================================
+lint: ## Verifica qualidade do código
+	@echo "$(GREEN)🔍 Verificando código...$(NC)"
+	$(DOCKER_COMPOSE) exec backend ruff check . || true
+	$(DOCKER_COMPOSE) exec backend black --check . || true
+
+format: ## Formata o código automaticamente
+	@echo "$(GREEN)🎨 Formatando código...$(NC)"
+	$(DOCKER_COMPOSE) exec backend black .
+	$(DOCKER_COMPOSE) exec backend isort .
+
+# ============================================
+# BUILD
+# ============================================
+build: ## Build das imagens Docker
+	@echo "$(GREEN)🏗️ Building images...$(NC)"
+	$(DOCKER_COMPOSE) build --no-cache
+
+build-backend: ## Build apenas do backend
+	$(DOCKER_COMPOSE) build backend
+
+build-frontend: ## Build apenas do frontend
+	$(DOCKER_COMPOSE) build frontend
+
+# ============================================
+# DATABASE
+# ============================================
+migrate: ## Executa migrations
+	@echo "$(GREEN)📦 Executando migrations...$(NC)"
+	$(DOCKER_COMPOSE) exec backend alembic upgrade head
+
+migrate-rollback: ## Reverte última migration
+	$(DOCKER_COMPOSE) exec backend alembic downgrade -1
+
+backup-db: ## Cria backup do banco
+	@echo "$(GREEN)💾 Criando backup...$(NC)"
+	@mkdir -p backups
+	$(DOCKER_COMPOSE) exec db pg_dump -U contabil contabil > backups/backup_$$(date +%Y%m%d_%H%M%S).sql
+	@echo "$(GREEN)✅ Backup criado em backups/$(NC)"
+
+# ============================================
+# DEPLOY HOMOLOGAÇÃO
+# ============================================
+deploy-staging: ## Deploy em homologação
+	@echo "$(GREEN)🚀 Deploy em HOMOLOGAÇÃO...$(NC)"
+	$(DOCKER_COMPOSE_STAGING) pull
+	$(DOCKER_COMPOSE_STAGING) up -d
+	@echo "$(GREEN)✅ Deploy em homologação concluído$(NC)"
+
+staging-logs: ## Logs de homologação
+	$(DOCKER_COMPOSE_STAGING) logs -f
+
+# ============================================
+# DEPLOY PRODUÇÃO
+# ============================================
+deploy-prod: ## Deploy em produção (requer confirmação)
+	@echo "$(RED)⚠️  ATENÇÃO: Deploy em PRODUÇÃO!$(NC)"
+	@read -p "Digite 'DEPLOY' para confirmar: " confirm; \
+	if [ "$$confirm" != "DEPLOY" ]; then \
+		echo "$(YELLOW)Deploy cancelado.$(NC)"; \
+		exit 1; \
+	fi
+	@echo "$(GREEN)🚀 Deploy em PRODUÇÃO...$(NC)"
+	@make backup-db
+	$(DOCKER_COMPOSE_PROD) pull
+	$(DOCKER_COMPOSE_PROD) up -d
+	@echo "$(GREEN)✅ Deploy em produção concluído$(NC)"
+
+prod-logs: ## Logs de produção
+	$(DOCKER_COMPOSE_PROD) logs -f
+
+# ============================================
+# LIMPEZA
+# ============================================
+clean: ## Remove containers e volumes
+	@echo "$(YELLOW)🧹 Limpando...$(NC)"
+	$(DOCKER_COMPOSE) down -v --remove-orphans
+	docker system prune -f
+
+# ============================================
+# UTILITÁRIOS
+# ============================================
+setup: ## Setup inicial do projeto
+	@echo "$(GREEN)🔧 Configurando projeto...$(NC)"
+	cp .env.example .env.development 2>/dev/null || true
+	make build
+	make up
+	sleep 5
+	make migrate
+	@echo "$(GREEN)✅ Setup concluído! Execute 'make dev' para iniciar.$(NC)"
+
+health: ## Verifica saúde dos serviços
+	@curl -sf http://localhost:8000/health && echo "$(GREEN)✅ Backend OK$(NC)" || echo "$(RED)❌ Backend FALHOU$(NC)"
+	@curl -sf http://localhost:3000 > /dev/null && echo "$(GREEN)✅ Frontend OK$(NC)" || echo "$(RED)❌ Frontend FALHOU$(NC)"
