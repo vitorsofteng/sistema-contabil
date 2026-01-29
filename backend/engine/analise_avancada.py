@@ -138,6 +138,7 @@ class DRE:
     despesas_pessoal: float = 0
     despesas_administrativas: float = 0
     despesas_comerciais: float = 0
+    despesas_financeiras: float = 0
     outras_despesas: float = 0
     total_despesas_operacionais: float = 0
     
@@ -368,17 +369,41 @@ def gerar_dre(dados_mensais: List[Dict], periodo: str = None) -> DRE:
         return DRE(periodo=periodo or "N/A")
     
     # Soma valores
-    receita = sum(d.get('receita', 0) or 0 for d in dados)
-    custos = sum(d.get('custos', 0) or 0 for d in dados)
-    despesas = sum(d.get('despesas', 0) or 0 for d in dados)
-    impostos = sum(d.get('impostos', 0) or 0 for d in dados)
-    folha = sum(d.get('folha', 0) or 0 for d in dados)
+    receita = sum(d.get('receita', 0) or d.get('receita_bruta', 0) or 0 for d in dados)
+    custos = sum(d.get('custos', 0) or d.get('custos_total', 0) or 0 for d in dados)
+    despesas = sum(d.get('despesas', 0) or d.get('despesas_operacionais', 0) or 0 for d in dados)
+    folha = sum(d.get('folha', 0) or d.get('despesas_pessoal', 0) or 0 for d in dados)
+    
+    # Impostos detalhados (se disponíveis)
+    deducoes = sum(d.get('deducoes_receita', 0) or 0 for d in dados)
+    iss = sum(d.get('iss', 0) or 0 for d in dados)
+    pis = sum(d.get('pis', 0) or 0 for d in dados)
+    cofins = sum(d.get('cofins', 0) or 0 for d in dados)
+    irpj = sum(d.get('irpj', 0) or 0 for d in dados)
+    csll = sum(d.get('csll', 0) or 0 for d in dados)
+    impostos_total = sum(d.get('impostos', 0) or d.get('impostos_total', 0) or 0 for d in dados)
+    
+    # Despesas detalhadas (se disponíveis)
+    desp_admin = sum(d.get('despesas_administrativas', 0) or 0 for d in dados)
+    desp_comercial = sum(d.get('despesas_comerciais', 0) or 0 for d in dados)
+    desp_financeira = sum(d.get('despesas_financeiras', 0) or 0 for d in dados)
+    outras_desp = sum(d.get('outras_despesas', 0) or 0 for d in dados)
     
     dre = DRE(periodo=periodo or f"{dados[0].get('ano', 'N/A')}")
     
     # Receitas
     dre.receita_bruta = receita
-    dre.deducoes_receita = impostos * 0.3  # Estimativa: 30% dos impostos são sobre receita
+    
+    # Deduções da receita - usar dados reais se disponíveis
+    if deducoes > 0:
+        dre.deducoes_receita = deducoes
+    elif (iss + pis + cofins) > 0:
+        # Usa impostos sobre receita (ISS, PIS, COFINS)
+        dre.deducoes_receita = iss + pis + cofins
+    else:
+        # Estimativa conservadora: 10% da receita para Simples, até 15% para outros
+        dre.deducoes_receita = receita * 0.10
+    
     dre.receita_liquida = receita - dre.deducoes_receita
     
     # Custos
@@ -386,19 +411,38 @@ def gerar_dre(dados_mensais: List[Dict], periodo: str = None) -> DRE:
     dre.lucro_bruto = dre.receita_liquida - custos
     dre.margem_bruta_pct = (dre.lucro_bruto / receita * 100) if receita > 0 else 0
     
-    # Despesas
+    # Despesas - usar dados reais se disponíveis
     dre.despesas_pessoal = folha
-    dre.despesas_administrativas = despesas * 0.6
-    dre.despesas_comerciais = despesas * 0.3
-    dre.outras_despesas = despesas * 0.1
-    dre.total_despesas_operacionais = folha + despesas
+    
+    if desp_admin > 0 or desp_comercial > 0 or outras_desp > 0:
+        # Usa dados detalhados
+        dre.despesas_administrativas = desp_admin
+        dre.despesas_comerciais = desp_comercial
+        dre.outras_despesas = outras_desp
+    else:
+        # Estima distribuição
+        dre.despesas_administrativas = despesas * 0.5
+        dre.despesas_comerciais = despesas * 0.3
+        dre.outras_despesas = despesas * 0.2
+    
+    dre.despesas_financeiras = desp_financeira
+    dre.total_despesas_operacionais = folha + despesas + desp_financeira
     
     # Resultado operacional
     dre.lucro_operacional = dre.lucro_bruto - dre.total_despesas_operacionais
     dre.margem_operacional_pct = (dre.lucro_operacional / receita * 100) if receita > 0 else 0
     
+    # Impostos sobre lucro - usar dados reais se disponíveis
+    if (irpj + csll) > 0:
+        dre.impostos = irpj + csll
+    elif impostos_total > dre.deducoes_receita:
+        # Impostos totais menos deduções = impostos sobre lucro
+        dre.impostos = impostos_total - dre.deducoes_receita
+    else:
+        # Estimar: 15% + adicional para lucro real, ou parte do simples
+        dre.impostos = max(0, dre.lucro_operacional * 0.15) if dre.lucro_operacional > 0 else 0
+    
     # Resultado final
-    dre.impostos = impostos * 0.7  # 70% são impostos sobre lucro
     dre.lucro_liquido = dre.lucro_operacional - dre.impostos
     dre.margem_liquida_pct = (dre.lucro_liquido / receita * 100) if receita > 0 else 0
     
@@ -498,8 +542,11 @@ def calcular_indices(dados_mensais: List[Dict]) -> IndicesFinanceiros:
     # 3. Liquidez Imediata = Disponibilidades / PC
     idx.liquidez_imediata = disponibilidades / pc if pc > 0 else 0
     
-    # 4. Liquidez Geral = (AC + ANC) / (PC + PNC)
-    idx.liquidez_geral = (ac + anc) / (pc + pnc) if (pc + pnc) > 0 else 0
+    # 4. Liquidez Geral = (AC + Realizável LP) / (PC + PNC)
+    # NOTA: Usa apenas Realizável a Longo Prazo (não inclui Imobilizado/Intangível)
+    realizavel_lp = ultimo.get('realizavel_lp', 0) or 0
+    # Se não tem realizável LP explícito, usar apenas AC (conservador)
+    idx.liquidez_geral = (ac + realizavel_lp) / (pc + pnc) if (pc + pnc) > 0 else 0
     
     # 5. Liquidez Operacional = AC Operacional / PC Operacional
     ac_operacional = contas_receber + estoques
