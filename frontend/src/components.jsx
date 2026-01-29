@@ -503,11 +503,11 @@ function AuthBranding() {
         {/* Logo */}
         <div className="flex items-center gap-3">
           <div className="w-12 h-12 bg-gradient-to-br from-emerald-400 to-emerald-600 rounded-xl flex items-center justify-center shadow-lg shadow-emerald-500/30">
-            <DollarSign className="w-7 h-7 text-white" />
+            <BarChart3 className="w-7 h-7 text-white" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-white">ContaFácil</h1>
-            <p className="text-emerald-400 text-sm font-medium">Gestão Contábil Inteligente</p>
+            <h1 className="text-2xl font-bold text-white">Kontabil</h1>
+            <p className="text-emerald-400 text-sm font-medium">Análise Financeira Inteligente</p>
           </div>
         </div>
 
@@ -541,18 +541,18 @@ function AuthBranding() {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-6">
             <div className="text-center">
-              <div className="text-2xl font-bold text-white">500+</div>
-              <div className="text-slate-400 text-xs">Empresas</div>
+              <div className="text-2xl font-bold text-emerald-400">✓</div>
+              <div className="text-slate-400 text-xs">Gratuito</div>
             </div>
             <div className="w-px h-8 bg-slate-700"></div>
             <div className="text-center">
-              <div className="text-2xl font-bold text-white">10k+</div>
-              <div className="text-slate-400 text-xs">Relatórios</div>
+              <div className="text-2xl font-bold text-emerald-400">✓</div>
+              <div className="text-slate-400 text-xs">Sem cartão</div>
             </div>
             <div className="w-px h-8 bg-slate-700"></div>
             <div className="text-center">
-              <div className="text-2xl font-bold text-white">99.9%</div>
-              <div className="text-slate-400 text-xs">Uptime</div>
+              <div className="text-2xl font-bold text-emerald-400">✓</div>
+              <div className="text-slate-400 text-xs">Fácil de usar</div>
             </div>
           </div>
         </div>
@@ -561,7 +561,7 @@ function AuthBranding() {
   );
 }
 
-function LoginPage({ onToggle }) {
+function LoginPage({ onToggle, onForgot }) {
   const { login } = useAuth();
   const [email, setEmail] = useState('');
   const [senha, setSenha] = useState('');
@@ -598,11 +598,11 @@ function LoginPage({ onToggle }) {
           {/* Mobile Logo */}
           <div className="lg:hidden flex items-center justify-center gap-3 mb-8">
             <div className="w-12 h-12 bg-gradient-to-br from-emerald-400 to-emerald-600 rounded-xl flex items-center justify-center">
-              <DollarSign className="w-7 h-7 text-white" />
+              <BarChart3 className="w-7 h-7 text-white" />
             </div>
             <div>
-              <h1 className="text-xl font-bold text-slate-900">ContaFácil</h1>
-              <p className="text-emerald-600 text-xs font-medium">Gestão Contábil</p>
+              <h1 className="text-xl font-bold text-slate-900">Kontabil</h1>
+              <p className="text-emerald-600 text-xs font-medium">Análise Financeira</p>
             </div>
           </div>
 
@@ -674,7 +674,7 @@ function LoginPage({ onToggle }) {
                 <input type="checkbox" className="w-4 h-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500" />
                 <span className="text-sm text-slate-600">Lembrar de mim</span>
               </label>
-              <button type="button" className="text-sm text-emerald-600 hover:text-emerald-700 font-medium">
+              <button type="button" onClick={onForgot} className="text-sm text-emerald-600 hover:text-emerald-700 font-medium">
                 Esqueci a senha
               </button>
             </div>
@@ -805,11 +805,11 @@ function RegisterPage({ onToggle }) {
           {/* Mobile Logo */}
           <div className="lg:hidden flex items-center justify-center gap-3 mb-8">
             <div className="w-12 h-12 bg-gradient-to-br from-emerald-400 to-emerald-600 rounded-xl flex items-center justify-center">
-              <DollarSign className="w-7 h-7 text-white" />
+              <BarChart3 className="w-7 h-7 text-white" />
             </div>
             <div>
-              <h1 className="text-xl font-bold text-slate-900">ContaFácil</h1>
-              <p className="text-emerald-600 text-xs font-medium">Gestão Contábil</p>
+              <h1 className="text-xl font-bold text-slate-900">Kontabil</h1>
+              <p className="text-emerald-600 text-xs font-medium">Análise Financeira</p>
             </div>
           </div>
 
@@ -1012,11 +1012,383 @@ function RegisterPage({ onToggle }) {
 }
 
 function AuthPages() {
-  const [isLogin, setIsLogin] = useState(true);
+  const [page, setPage] = useState('login'); // login, register, forgot, reset
+  const [resetToken, setResetToken] = useState('');
   
-  return isLogin 
-    ? <LoginPage onToggle={() => setIsLogin(false)} />
-    : <RegisterPage onToggle={() => setIsLogin(true)} />;
+  if (page === 'forgot') {
+    return <ForgotPasswordPage onBack={() => setPage('login')} onTokenReceived={(token) => { setResetToken(token); setPage('reset'); }} />;
+  }
+  
+  if (page === 'reset') {
+    return <ResetPasswordPage token={resetToken} onBack={() => setPage('login')} onSuccess={() => setPage('login')} />;
+  }
+  
+  if (page === 'register') {
+    return <RegisterPage onToggle={() => setPage('login')} />;
+  }
+  
+  return <LoginPage onToggle={() => setPage('register')} onForgot={() => setPage('forgot')} />;
+}
+
+// Página de Esqueci Minha Senha
+function ForgotPasswordPage({ onBack, onTokenReceived }) {
+  const [email, setEmail] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [error, setError] = useState('');
+  const [devToken, setDevToken] = useState('');
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
+    
+    try {
+      const res = await fetch(`${API_URL}/auth/reset-senha`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email })
+      });
+      
+      const data = await res.json();
+      
+      if (!res.ok) {
+        throw new Error(data.detail || 'Erro ao solicitar recuperação');
+      }
+      
+      setSent(true);
+      
+      // Em desenvolvimento, mostrar token (para testes)
+      if (data._dev_token) {
+        setDevToken(data._dev_token);
+      }
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen flex bg-slate-50">
+      <AuthBranding />
+      
+      <div className="w-full lg:w-1/2 flex items-center justify-center p-8">
+        <div className="w-full max-w-md">
+          {/* Mobile Logo */}
+          <div className="lg:hidden flex items-center justify-center gap-3 mb-8">
+            <div className="w-12 h-12 bg-gradient-to-br from-emerald-400 to-emerald-600 rounded-xl flex items-center justify-center">
+              <BarChart3 className="w-7 h-7 text-white" />
+            </div>
+            <div>
+              <h1 className="text-xl font-bold text-slate-900">Kontabil</h1>
+              <p className="text-emerald-600 text-xs font-medium">Análise Financeira</p>
+            </div>
+          </div>
+
+          {!sent ? (
+            <>
+              <button 
+                onClick={onBack}
+                className="flex items-center gap-2 text-slate-600 hover:text-slate-900 mb-6"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                Voltar para login
+              </button>
+
+              <div className="text-center lg:text-left mb-8">
+                <h2 className="text-3xl font-bold text-slate-900">Esqueceu sua senha?</h2>
+                <p className="text-slate-500 mt-2">
+                  Digite seu email e enviaremos instruções para recuperar sua senha.
+                </p>
+              </div>
+              
+              {error && (
+                <div className="mb-6 p-4 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm flex items-start gap-3">
+                  <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                  <p>{error}</p>
+                </div>
+              )}
+              
+              <form onSubmit={handleSubmit} className="space-y-5">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">Email</label>
+                  <div className="relative">
+                    <input
+                      type="email"
+                      value={email}
+                      onChange={e => setEmail(e.target.value)}
+                      placeholder="seu@email.com"
+                      required
+                      className="w-full px-4 py-3 pl-11 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
+                    />
+                    <User className="w-5 h-5 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
+                  </div>
+                </div>
+                
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full py-3 px-4 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white font-semibold rounded-xl shadow-lg shadow-emerald-500/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                >
+                  {loading ? (
+                    <>
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                      Enviando...
+                    </>
+                  ) : (
+                    'Enviar instruções'
+                  )}
+                </button>
+              </form>
+            </>
+          ) : (
+            <div className="text-center">
+              <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-6">
+                <CheckCircle className="w-8 h-8 text-emerald-600" />
+              </div>
+              
+              <h2 className="text-2xl font-bold text-slate-900 mb-2">Email enviado!</h2>
+              <p className="text-slate-500 mb-6">
+                Se existe uma conta com o email <strong>{email}</strong>, você receberá instruções para recuperar sua senha.
+              </p>
+              
+              {/* Token de desenvolvimento - REMOVER EM PRODUÇÃO */}
+              {devToken && (
+                <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-xl text-left">
+                  <p className="text-amber-800 text-sm font-medium mb-2">🔧 Modo Desenvolvimento</p>
+                  <p className="text-amber-700 text-xs mb-2">Token de recuperação (não aparece em produção):</p>
+                  <code className="block p-2 bg-amber-100 rounded text-xs break-all">{devToken}</code>
+                  <button
+                    onClick={() => onTokenReceived(devToken)}
+                    className="mt-3 w-full py-2 px-4 bg-amber-600 hover:bg-amber-700 text-white text-sm font-medium rounded-lg transition-colors"
+                  >
+                    Usar este token para redefinir senha
+                  </button>
+                </div>
+              )}
+              
+              <button 
+                onClick={onBack}
+                className="text-emerald-600 font-semibold hover:text-emerald-700"
+              >
+                Voltar para login
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Página de Redefinir Senha
+function ResetPasswordPage({ token, onBack, onSuccess }) {
+  const [senha, setSenha] = useState('');
+  const [confirmarSenha, setConfirmarSenha] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [tokenInput, setTokenInput] = useState(token || '');
+
+  const passwordChecks = [
+    { label: 'Mínimo 8 caracteres', check: senha.length >= 8 },
+    { label: 'Uma letra maiúscula', check: /[A-Z]/.test(senha) },
+    { label: 'Uma letra minúscula', check: /[a-z]/.test(senha) },
+    { label: 'Um número', check: /\d/.test(senha) },
+  ];
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
+    
+    if (senha !== confirmarSenha) {
+      setError('As senhas não coincidem');
+      return;
+    }
+    
+    if (!passwordChecks.every(c => c.check)) {
+      setError('A senha não atende aos requisitos mínimos');
+      return;
+    }
+    
+    setLoading(true);
+    
+    try {
+      const res = await fetch(`${API_URL}/auth/reset-senha/confirmar`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: tokenInput, nova_senha: senha })
+      });
+      
+      const data = await res.json();
+      
+      if (!res.ok) {
+        throw new Error(data.detail?.message || data.detail || 'Erro ao redefinir senha');
+      }
+      
+      setSuccess(true);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (success) {
+    return (
+      <div className="min-h-screen flex bg-slate-50">
+        <AuthBranding />
+        
+        <div className="w-full lg:w-1/2 flex items-center justify-center p-8">
+          <div className="w-full max-w-md text-center">
+            <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-6">
+              <CheckCircle className="w-8 h-8 text-emerald-600" />
+            </div>
+            
+            <h2 className="text-2xl font-bold text-slate-900 mb-2">Senha alterada!</h2>
+            <p className="text-slate-500 mb-6">
+              Sua senha foi redefinida com sucesso. Agora você pode fazer login com sua nova senha.
+            </p>
+            
+            <button 
+              onClick={onSuccess}
+              className="w-full py-3 px-4 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white font-semibold rounded-xl shadow-lg shadow-emerald-500/30 transition-all"
+            >
+              Ir para login
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen flex bg-slate-50">
+      <AuthBranding />
+      
+      <div className="w-full lg:w-1/2 flex items-center justify-center p-8">
+        <div className="w-full max-w-md">
+          {/* Mobile Logo */}
+          <div className="lg:hidden flex items-center justify-center gap-3 mb-8">
+            <div className="w-12 h-12 bg-gradient-to-br from-emerald-400 to-emerald-600 rounded-xl flex items-center justify-center">
+              <BarChart3 className="w-7 h-7 text-white" />
+            </div>
+            <div>
+              <h1 className="text-xl font-bold text-slate-900">Kontabil</h1>
+              <p className="text-emerald-600 text-xs font-medium">Análise Financeira</p>
+            </div>
+          </div>
+
+          <button 
+            onClick={onBack}
+            className="flex items-center gap-2 text-slate-600 hover:text-slate-900 mb-6"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            Voltar para login
+          </button>
+
+          <div className="text-center lg:text-left mb-8">
+            <h2 className="text-3xl font-bold text-slate-900">Nova senha</h2>
+            <p className="text-slate-500 mt-2">
+              Digite sua nova senha abaixo.
+            </p>
+          </div>
+          
+          {error && (
+            <div className="mb-6 p-4 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm flex items-start gap-3">
+              <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+              <p>{error}</p>
+            </div>
+          )}
+          
+          <form onSubmit={handleSubmit} className="space-y-5">
+            {!token && (
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">Token de recuperação</label>
+                <input
+                  type="text"
+                  value={tokenInput}
+                  onChange={e => setTokenInput(e.target.value)}
+                  placeholder="Cole o token recebido por email"
+                  required
+                  className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
+                />
+              </div>
+            )}
+            
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">Nova senha</label>
+              <div className="relative">
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  value={senha}
+                  onChange={e => setSenha(e.target.value)}
+                  placeholder="••••••••"
+                  required
+                  className="w-full px-4 py-3 pl-11 pr-11 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
+                />
+                <Settings className="w-5 h-5 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                >
+                  {showPassword ? <XCircle className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                </button>
+              </div>
+              
+              {/* Requisitos de senha */}
+              <div className="mt-3 space-y-2">
+                {passwordChecks.map((item, idx) => (
+                  <div key={idx} className="flex items-center gap-2">
+                    <div className={`w-4 h-4 rounded-full flex items-center justify-center ${item.check ? 'bg-emerald-500' : 'bg-slate-200'}`}>
+                      {item.check && <Check className="w-3 h-3 text-white" />}
+                    </div>
+                    <span className={`text-xs ${item.check ? 'text-emerald-600' : 'text-slate-500'}`}>{item.label}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">Confirmar nova senha</label>
+              <div className="relative">
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  value={confirmarSenha}
+                  onChange={e => setConfirmarSenha(e.target.value)}
+                  placeholder="••••••••"
+                  required
+                  className="w-full px-4 py-3 pl-11 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
+                />
+                <Settings className="w-5 h-5 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
+              </div>
+              {confirmarSenha && senha !== confirmarSenha && (
+                <p className="text-red-500 text-xs mt-1">As senhas não coincidem</p>
+              )}
+            </div>
+            
+            <button
+              type="submit"
+              disabled={loading || !passwordChecks.every(c => c.check) || senha !== confirmarSenha}
+              className="w-full py-3 px-4 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white font-semibold rounded-xl shadow-lg shadow-emerald-500/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            >
+              {loading ? (
+                <>
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  Salvando...
+                </>
+              ) : (
+                'Salvar nova senha'
+              )}
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // ============================================================================
@@ -1056,7 +1428,7 @@ function Sidebar({ currentPage, onNavigate, collapsed, onToggle }) {
         {!collapsed && (
           <div className="flex items-center gap-2">
             <BarChart3 className="w-8 h-8 text-white/90" />
-            <span className="font-bold text-lg">{theme.nome_escritorio || 'ContaGestor'}</span>
+            <span className="font-bold text-lg">{theme.nome_escritorio || 'Kontabil'}</span>
           </div>
         )}
         <button onClick={onToggle} className="p-1.5 hover:bg-white/10 rounded-lg">

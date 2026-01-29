@@ -88,6 +88,14 @@ except ImportError:
     SessionManager = None
     PasswordRecovery = None
 
+# Serviço de Email
+try:
+    from core.email_service import email_service
+    EMAIL_SERVICE_AVAILABLE = True
+except ImportError:
+    EMAIL_SERVICE_AVAILABLE = False
+    email_service = None
+
 from data.database import (
     init_db, criar_contador, autenticar_contador, validar_token, logout,
     criar_empresa, listar_empresas, obter_empresa, atualizar_empresa, excluir_empresa,
@@ -805,7 +813,7 @@ async def solicitar_reset(dados: ResetSenhaRequest, request: Request):
     """
     Solicita reset de senha.
     
-    Um token será gerado (em produção, enviado por email).
+    Um token será gerado e enviado por email.
     Token expira em 1 hora.
     """
     # Rate limiting para reset de senha
@@ -819,6 +827,14 @@ async def solicitar_reset(dados: ResetSenhaRequest, request: Request):
             )
     
     token = solicitar_reset_senha(dados.email)
+    
+    # Enviar email de recuperação
+    if token and EMAIL_SERVICE_AVAILABLE and email_service:
+        email_service.send_password_reset(
+            to_email=dados.email,
+            reset_token=token,
+            user_name=dados.email.split('@')[0]  # Nome do email como fallback
+        )
     
     response = {
         "ok": True, 
