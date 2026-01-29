@@ -3831,6 +3831,17 @@ except ImportError as e:
     print(f"Módulo analise_avancada não disponível: {e}")
     ANALISE_FINANCEIRA_AVAILABLE = False
 
+# Importa Score Profissional v2.0
+try:
+    from engine.score_profissional import (
+        calcular_score_profissional, detectar_setor,
+        BENCHMARKS as BENCHMARKS_SCORE
+    )
+    SCORE_PROFISSIONAL_AVAILABLE = True
+except ImportError as e:
+    print(f"Módulo score_profissional não disponível: {e}")
+    SCORE_PROFISSIONAL_AVAILABLE = False
+
 
 @app.get("/empresas/{empresa_id}/analise-financeira")
 async def obter_analise_financeira(
@@ -3960,6 +3971,58 @@ async def obter_break_even(
     from dataclasses import asdict
     be = calcular_break_even(dados_mensais)
     return {"break_even": asdict(be)}
+
+
+@app.get("/empresas/{empresa_id}/score-profissional")
+async def obter_score_profissional(
+    empresa_id: int,
+    user: Dict = Depends(get_user)
+):
+    """
+    Obtém Score Profissional v2.0 da empresa.
+    
+    O score considera:
+    - Benchmarks do setor específico
+    - Z-Score de Altman (risco de falência)
+    - Análise de tendência
+    - Múltiplas dimensões ponderadas
+    
+    Retorna classificação A/B/C/D/E com detalhamento completo.
+    """
+    if not SCORE_PROFISSIONAL_AVAILABLE:
+        raise HTTPException(status_code=501, detail="Módulo de Score Profissional não disponível")
+    
+    empresa = obter_empresa(empresa_id, user['id'])
+    if not empresa:
+        raise HTTPException(status_code=404, detail="Empresa não encontrada")
+    
+    dados_mensais = listar_dados_mensais(empresa_id, limite=36)
+    
+    if len(dados_mensais) < 3:
+        raise HTTPException(status_code=400, detail="Mínimo de 3 meses de dados para calcular score")
+    
+    # Detectar setor
+    setor = detectar_setor(empresa)
+    
+    # Montar dados do balanço (último período)
+    ultimo = dados_mensais[0] if dados_mensais else {}
+    dados_balanco = {
+        'ativo_total': ultimo.get('ativo_total', 0),
+        'ativo_circulante': ultimo.get('ativo_circulante', 0),
+        'passivo_total': ultimo.get('passivo_total', 0),
+        'passivo_circulante': ultimo.get('passivo_circulante', 0),
+        'patrimonio_liquido': ultimo.get('patrimonio_liquido', 0),
+    }
+    
+    # Calcular score
+    score = calcular_score_profissional(dados_mensais, setor, dados_balanco)
+    
+    return {
+        "score": score.to_dict(),
+        "empresa": empresa.get('razao_social'),
+        "setor_detectado": setor,
+        "meses_analisados": len(dados_mensais)
+    }
 
 
 @app.get("/empresas/{empresa_id}/projecoes")
