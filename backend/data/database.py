@@ -464,8 +464,8 @@ def criar_contador(nome: str, email: str, senha: str, telefone: str = None, crc:
                 contador_id=contador.id,
                 token_jti=access_payload['jti'],
                 refresh_token_jti=refresh_payload['jti'],
-                expires_at=datetime.utcnow() + timedelta(minutes=15),
-                refresh_expires_at=datetime.utcnow() + timedelta(days=7)
+                expires_at=datetime.utcnow() + timedelta(hours=8),
+                refresh_expires_at=datetime.utcnow() + timedelta(days=30)
             )
         else:
             access_token = secrets.token_urlsafe(32)
@@ -475,8 +475,8 @@ def criar_contador(nome: str, email: str, senha: str, telefone: str = None, crc:
                 contador_id=contador.id,
                 token_jti=access_token,
                 refresh_token_jti=refresh_token,
-                expires_at=datetime.now() + timedelta(minutes=15),
-                refresh_expires_at=datetime.now() + timedelta(days=7)
+                expires_at=datetime.now() + timedelta(hours=8),
+                refresh_expires_at=datetime.now() + timedelta(days=30)
             )
         
         db.add(sessao)
@@ -489,7 +489,7 @@ def criar_contador(nome: str, email: str, senha: str, telefone: str = None, crc:
             'crc': contador.crc,
             'token': access_token,
             'refresh_token': refresh_token,
-            'expires_in': 900
+            'expires_in': 28800
         }
 
 
@@ -532,8 +532,8 @@ def autenticar_contador(email: str, senha: str, ip: str = None) -> Optional[Dict
                 token_jti=access_payload['jti'],
                 refresh_token_jti=refresh_payload['jti'],
                 ip_address=ip,
-                expires_at=datetime.utcnow() + timedelta(minutes=15),
-                refresh_expires_at=datetime.utcnow() + timedelta(days=7)
+                expires_at=datetime.utcnow() + timedelta(hours=8),
+                refresh_expires_at=datetime.utcnow() + timedelta(days=30)
             )
         else:
             access_token = secrets.token_urlsafe(32)
@@ -544,8 +544,8 @@ def autenticar_contador(email: str, senha: str, ip: str = None) -> Optional[Dict
                 token_jti=access_token,
                 refresh_token_jti=refresh_token,
                 ip_address=ip,
-                expires_at=datetime.now() + timedelta(minutes=15),
-                refresh_expires_at=datetime.now() + timedelta(days=7)
+                expires_at=datetime.now() + timedelta(hours=8),
+                refresh_expires_at=datetime.now() + timedelta(days=30)
             )
         
         db.add(sessao)
@@ -558,7 +558,7 @@ def autenticar_contador(email: str, senha: str, ip: str = None) -> Optional[Dict
             'crc': contador.crc,
             'token': access_token,
             'refresh_token': refresh_token,
-            'expires_in': 900
+            'expires_in': 28800
         }
 
 
@@ -677,12 +677,12 @@ def refresh_access_token(refresh_token: str) -> Optional[Dict]:
         new_payload = decode_access_token(new_token)
         
         sessao.token_jti = new_payload['jti']
-        sessao.expires_at = datetime.utcnow() + timedelta(minutes=15)
+        sessao.expires_at = datetime.utcnow() + timedelta(hours=8)
         sessao.last_used_at = datetime.now()
         
         return {
             'token': new_token,
-            'expires_in': 900,
+            'expires_in': 28800,
             'user': {
                 'id': contador.id,
                 'nome': contador.nome,

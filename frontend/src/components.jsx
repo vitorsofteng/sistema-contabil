@@ -20,11 +20,37 @@ const API_URL = import.meta.env.VITE_API_URL || '/api';
 
 const AuthContext = createContext(null);
 
+// Decodifica payload do JWT (sem verificar assinatura - só para ler expiração)
+function decodeJWT(token) {
+  try {
+    const base64Url = token.split('.')[1];
+    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+    const payload = JSON.parse(window.atob(base64));
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+// Verifica se token está próximo de expirar (menos de 30 minutos)
+function isTokenExpiringSoon(token, minutesBefore = 30) {
+  const payload = decodeJWT(token);
+  if (!payload || !payload.exp) return true;
+  const expiresAt = payload.exp * 1000; // converter para ms
+  const now = Date.now();
+  const threshold = minutesBefore * 60 * 1000;
+  return (expiresAt - now) < threshold;
+}
+
 function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(localStorage.getItem('token'));
   const [refreshToken, setRefreshToken] = useState(localStorage.getItem('refresh_token'));
   const [loading, setLoading] = useState(true);
+  
+  // Mutex para evitar múltiplos refreshes simultâneos
+  const refreshingRef = useRef(false);
+  const refreshPromiseRef = useRef(null);
 
   useEffect(() => {
     if (token) {
@@ -32,26 +58,67 @@ function AuthProvider({ children }) {
     } else {
       setLoading(false);
     }
-  }, [token]);
+  }, []);
+
+  // Refresh proativo - verifica a cada 5 minutos se precisa renovar
+  useEffect(() => {
+    if (!token || !refreshToken) return;
+    
+    const checkAndRefresh = async () => {
+      if (isTokenExpiringSoon(token, 30)) {
+        console.log('🔄 Token expirando em breve, renovando proativamente...');
+        await tryRefreshToken();
+      }
+    };
+    
+    // Verifica imediatamente
+    checkAndRefresh();
+    
+    // Verifica a cada 5 minutos
+    const interval = setInterval(checkAndRefresh, 5 * 60 * 1000);
+    
+    return () => clearInterval(interval);
+  }, [token, refreshToken]);
 
   const fetchUser = async () => {
     try {
+      // Se token está expirando, renova primeiro
+      let currentToken = token;
+      if (isTokenExpiringSoon(token, 5)) {
+        const refreshed = await tryRefreshToken();
+        if (refreshed) {
+          currentToken = localStorage.getItem('token');
+        }
+      }
+      
       const res = await fetch(`${API_URL}/auth/me`, {
-        headers: { 'Authorization': `Bearer ${token}` }
+        headers: { 'Authorization': `Bearer ${currentToken}` }
       });
       if (res.ok) {
         const data = await res.json();
         setUser(data);
       } else if (res.status === 401 && refreshToken) {
-        // Tenta refresh
         const refreshed = await tryRefreshToken();
-        if (!refreshed) {
+        if (refreshed) {
+          // Tenta novamente com novo token
+          const newToken = localStorage.getItem('token');
+          const retryRes = await fetch(`${API_URL}/auth/me`, {
+            headers: { 'Authorization': `Bearer ${newToken}` }
+          });
+          if (retryRes.ok) {
+            const data = await retryRes.json();
+            setUser(data);
+          } else {
+            logout();
+          }
+        } else {
           logout();
         }
       } else {
         logout();
       }
     } catch (err) {
+      console.error('Erro ao buscar usuário:', err);
       logout();
     } finally {
       setLoading(false);
@@ -59,26 +126,49 @@ function AuthProvider({ children }) {
   };
 
   const tryRefreshToken = async () => {
-    try {
-      const res = await fetch(`${API_URL}/auth/refresh`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refresh_token: refreshToken })
-      });
-      
-      if (res.ok) {
-        const data = await res.json();
-        localStorage.setItem('token', data.token);
-        setToken(data.token);
-        if (data.user) {
-          setUser(data.user);
-        }
-        return true;
-      }
-      return false;
-    } catch {
-      return false;
+    // Se já está refreshando, aguarda a promise existente
+    if (refreshingRef.current && refreshPromiseRef.current) {
+      console.log('⏳ Refresh já em andamento, aguardando...');
+      return refreshPromiseRef.current;
     }
+    
+    refreshingRef.current = true;
+    
+    refreshPromiseRef.current = (async () => {
+      try {
+        const currentRefreshToken = localStorage.getItem('refresh_token');
+        if (!currentRefreshToken) {
+          return false;
+        }
+        
+        const res = await fetch(`${API_URL}/auth/refresh`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refresh_token: currentRefreshToken })
+        });
+        
+        if (res.ok) {
+          const data = await res.json();
+          localStorage.setItem('token', data.token);
+          setToken(data.token);
+          if (data.user) {
+            setUser(data.user);
+          }
+          console.log('✅ Token renovado com sucesso');
+          return true;
+        }
+        console.warn('❌ Falha ao renovar token:', res.status);
+        return false;
+      } catch (err) {
+        console.error('❌ Erro ao renovar token:', err);
+        return false;
+      } finally {
+        refreshingRef.current = false;
+        refreshPromiseRef.current = null;
+      }
+    })();
+    
+    return refreshPromiseRef.current;
   };
 
   const login = async (email, senha) => {
@@ -124,12 +214,12 @@ function AuthProvider({ children }) {
   };
 
   const logout = async () => {
-    // Tenta fazer logout no servidor
-    if (token) {
+    const currentToken = localStorage.getItem('token');
+    if (currentToken) {
       try {
         await fetch(`${API_URL}/auth/logout`, {
           method: 'POST',
-          headers: { 'Authorization': `Bearer ${token}` }
+          headers: { 'Authorization': `Bearer ${currentToken}` }
         });
       } catch {}
     }
@@ -142,13 +232,21 @@ function AuthProvider({ children }) {
   };
 
   const api = async (path, options = {}) => {
-    // Não enviar Content-Type para FormData (browser define automaticamente com boundary)
+    let currentToken = localStorage.getItem('token');
+    
+    // Se token está expirando, renova antes de fazer a requisição
+    if (currentToken && isTokenExpiringSoon(currentToken, 5)) {
+      const refreshed = await tryRefreshToken();
+      if (refreshed) {
+        currentToken = localStorage.getItem('token');
+      }
+    }
+    
     const headers = {
-      'Authorization': `Bearer ${token}`,
+      'Authorization': `Bearer ${currentToken}`,
       ...options.headers
     };
     
-    // Só adiciona Content-Type: application/json se não for FormData
     if (!(options.body instanceof FormData) && !options.headers?.hasOwnProperty('Content-Type')) {
       headers['Content-Type'] = 'application/json';
     }
@@ -158,26 +256,31 @@ function AuthProvider({ children }) {
       headers
     });
     
-    // Se token expirou, tenta refresh
-    if (res.status === 401 && refreshToken) {
-      const refreshed = await tryRefreshToken();
-      if (refreshed) {
-        // Retry com novo token
-        const newToken = localStorage.getItem('token');
-        const retryHeaders = {
-          'Authorization': `Bearer ${newToken}`,
-          ...options.headers
-        };
-        if (!(options.body instanceof FormData) && !options.headers?.hasOwnProperty('Content-Type')) {
-          retryHeaders['Content-Type'] = 'application/json';
+    // Se ainda assim deu 401, tenta refresh e retry
+    if (res.status === 401) {
+      const currentRefreshToken = localStorage.getItem('refresh_token');
+      if (currentRefreshToken) {
+        const refreshed = await tryRefreshToken();
+        if (refreshed) {
+          const newToken = localStorage.getItem('token');
+          const retryHeaders = {
+            'Authorization': `Bearer ${newToken}`,
+            ...options.headers
+          };
+          if (!(options.body instanceof FormData) && !options.headers?.hasOwnProperty('Content-Type')) {
+            retryHeaders['Content-Type'] = 'application/json';
+          }
+          res = await fetch(`${API_URL}${path}`, {
+            ...options,
+            headers: retryHeaders
+          });
+        } else {
+          logout();
+          throw new Error('Sessão expirada. Faça login novamente.');
         }
-        res = await fetch(`${API_URL}${path}`, {
-          ...options,
-          headers: retryHeaders
-        });
       } else {
         logout();
-        throw new Error('Sessão expirada');
+        throw new Error('Sessão expirada. Faça login novamente.');
       }
     }
     

@@ -42,8 +42,8 @@ class AuthConfig:
     SECRET_KEY = os.environ.get('SECRET_KEY', secrets.token_urlsafe(32))
     REFRESH_SECRET_KEY = os.environ.get('REFRESH_SECRET_KEY', secrets.token_urlsafe(32))
     ALGORITHM = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES = 15
-    REFRESH_TOKEN_EXPIRE_DAYS = 7
+    ACCESS_TOKEN_EXPIRE_MINUTES = 480  # 8 horas
+    REFRESH_TOKEN_EXPIRE_DAYS = 30     # 30 dias
     
     # Rate Limiting
     MAX_LOGIN_ATTEMPTS = 5
