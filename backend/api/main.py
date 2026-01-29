@@ -1748,7 +1748,27 @@ async def get_pdf(id: int, aid: int, user: Dict = Depends(get_user)):
     analise = obter_analise(aid, id)
     if not analise:
         raise HTTPException(status_code=404, detail="Análise não encontrada")
-    pdf = pdf_generator.generate(analise.get('resultado', {}))
+    
+    # Obter dados mensais da empresa
+    dados_mensais = listar_dados_mensais(id)
+    
+    # Preparar resultado completo para o PDF
+    resultado = {
+        'empresa': emp.get('razao_social', 'Empresa'),
+        'cnpj': emp.get('cnpj', ''),
+        'dados_mensais': dados_mensais,
+        'score': analise.get('score'),
+        'status': analise.get('status'),
+        'periodo_inicio': analise.get('periodo_inicio'),
+        'periodo_fim': analise.get('periodo_fim'),
+        'meses_analisados': analise.get('meses_analisados'),
+    }
+    
+    # Adicionar dados da análise
+    if analise.get('resultado'):
+        resultado.update(analise.get('resultado', {}))
+    
+    pdf = pdf_generator.generate(resultado)
     return Response(content=pdf, media_type="application/pdf",
                    headers={"Content-Disposition": f'attachment; filename="analise_{id}_{aid}.pdf"'})
 
