@@ -1560,8 +1560,24 @@ async def confirmar_upload(id: int, dados: UploadConfirm, user: Dict = Depends(g
     try:
         mapping_dict = dados.mapping
         company_data = csv_importer.import_csv(dados.csv_content, mapping_dict, emp['razao_social'], emp.get('cnpj',''))
+        
         registros_criados = 0
+        registros_atualizados = 0
+        registros_ignorados = 0
+        
+        # Buscar períodos existentes
+        dados_existentes = listar_dados_mensais(id, limite=999)
+        periodos_existentes = {(d['ano'], d['mes']) for d in dados_existentes}
+        
         for r in company_data.records:
+            periodo = (r.data.year, r.data.month)
+            existe = periodo in periodos_existentes
+            
+            if existe and not dados.substituir_existentes:
+                # Ignorar período que já existe
+                registros_ignorados += 1
+                continue
+            
             salvar_dados_mensais(id, {
                 'ano': r.data.year,
                 'mes': r.data.month,
@@ -1572,8 +1588,18 @@ async def confirmar_upload(id: int, dados: UploadConfirm, user: Dict = Depends(g
                 'folha': r.folha, 
                 'caixa': r.caixa
             })
-            registros_criados += 1
-        return {"ok": True, "registros_criados": registros_criados}
+            
+            if existe:
+                registros_atualizados += 1
+            else:
+                registros_criados += 1
+                
+        return {
+            "ok": True, 
+            "registros_criados": registros_criados,
+            "registros_atualizados": registros_atualizados,
+            "registros_ignorados": registros_ignorados
+        }
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Erro ao importar dados: {str(e)}")
 

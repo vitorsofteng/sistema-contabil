@@ -247,6 +247,7 @@ function EmpresaDetailPage({ empresaId, onNavigate }) {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [tab, setTab] = useState('visao-geral');
+  const [temNovossDados, setTemNovosDados] = useState(false); // Controla se há novos dados desde última análise
 
   useEffect(() => { loadData(); }, [empresaId]);
 
@@ -265,13 +266,36 @@ function EmpresaDetailPage({ empresaId, onNavigate }) {
       }
       if (regRes.ok) {
         const regData = await regRes.json();
-        setRegistros(regData.dados || regData || []);
-      }
-      if (anaRes.ok) {
+        const dadosList = regData.dados || regData || [];
+        setRegistros(dadosList);
+        
+        // Verificar se há dados mais recentes que a última análise
+        if (anaRes.ok) {
+          const anaData = await anaRes.json();
+          const analisesList = anaData.analises || anaData || [];
+          setAnalises(analisesList);
+          
+          if (analisesList.length > 0) {
+            setUltimaAnalise(analisesList[0]);
+            const dataUltimaAnalise = new Date(analisesList[0].data_analise);
+            
+            // Verificar se algum dado foi criado/atualizado após a última análise
+            const temDadosNovos = dadosList.some(d => {
+              const dataAtualizacao = d.updated_at ? new Date(d.updated_at) : (d.created_at ? new Date(d.created_at) : null);
+              return dataAtualizacao && dataAtualizacao > dataUltimaAnalise;
+            });
+            setTemNovosDados(temDadosNovos);
+          } else {
+            // Nunca fez análise, pode analisar
+            setTemNovosDados(true);
+          }
+        }
+      } else if (anaRes.ok) {
         const anaData = await anaRes.json();
         const analisesList = anaData.analises || anaData || [];
         setAnalises(analisesList);
         if (analisesList.length > 0) setUltimaAnalise(analisesList[0]);
+        setTemNovosDados(analisesList.length === 0);
       }
     } catch (err) {
       toast.error('Erro ao carregar dados da empresa');
@@ -279,10 +303,16 @@ function EmpresaDetailPage({ empresaId, onNavigate }) {
       setLoading(false);
     }
   };
+  
+  // Callback quando importação é bem sucedida
+  const handleImportSuccess = () => {
+    setTemNovosDados(true);
+    loadData();
+  };
 
   const executarAnalise = async () => {
     if (registros.length < 3) {
-      toast.warning('Necessário pelo menos 6 meses de dados para análise');
+      toast.warning('Necessário pelo menos 3 meses de dados para análise');
       return;
     }
     
@@ -292,6 +322,7 @@ function EmpresaDetailPage({ empresaId, onNavigate }) {
       if (res.ok) {
         const result = await res.json();
         toast.success('Análise concluída com sucesso!');
+        setTemNovosDados(false); // Análise feita, desabilita botão
         await loadData();
         setTab('analise');
       } else {
@@ -368,7 +399,21 @@ function EmpresaDetailPage({ empresaId, onNavigate }) {
             >
               <PieChart className="w-4 h-4" /> DRE & Índices
             </Button>
-            <Button onClick={executarAnalise} loading={analisando} disabled={registros.length < 3}><BarChart3 className="w-4 h-4" /> Analisar</Button>
+            <div className="relative group">
+              <Button 
+                onClick={executarAnalise} 
+                loading={analisando} 
+                disabled={registros.length < 3 || (!temNovossDados && ultimaAnalise)}
+              >
+                <BarChart3 className="w-4 h-4" /> Analisar
+              </Button>
+              {!temNovossDados && ultimaAnalise && registros.length >= 3 && (
+                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-2 bg-slate-800 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10">
+                  Importe novos dados para analisar novamente
+                  <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-800"></div>
+                </div>
+              )}
+            </div>
           </div>
         }
       />
@@ -412,8 +457,8 @@ function EmpresaDetailPage({ empresaId, onNavigate }) {
       )}
       {tab === 'historico' && <HistoricoTab analises={analises} />}
       
-      <UploadModal isOpen={showUpload} onClose={() => setShowUpload(false)} empresaId={empresaId} onSuccess={loadData} />
-      <RegistroModal isOpen={showRegistro} onClose={() => setShowRegistro(false)} empresaId={empresaId} onSuccess={loadData} />
+      <UploadModal isOpen={showUpload} onClose={() => setShowUpload(false)} empresaId={empresaId} onSuccess={handleImportSuccess} registrosExistentes={registros} />
+      <RegistroModal isOpen={showRegistro} onClose={() => setShowRegistro(false)} empresaId={empresaId} onSuccess={handleImportSuccess} />
       <EditEmpresaModal isOpen={showEdit} onClose={() => setShowEdit(false)} empresa={empresa} onSuccess={() => { setShowEdit(false); loadData(); }} />
       
       {/* Modal de confirmação de exclusão */}
@@ -926,16 +971,42 @@ function HistoricoTab({ analises }) {
 // MODALS
 // ============================================================================
 
-function UploadModal({ isOpen, onClose, empresaId, onSuccess }) {
+function UploadModal({ isOpen, onClose, empresaId, onSuccess, registrosExistentes = [] }) {
   const { api } = useAuth();
   const toast = useToast();
-  const [step, setStep] = useState(1);
+  const [step, setStep] = useState(1); // 1=upload, 2=mapping, 3=conflitos
   const [file, setFile] = useState(null);
   const [csvContent, setCsvContent] = useState('');
   const [preview, setPreview] = useState(null);
   const [mapping, setMapping] = useState({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [conflitos, setConflitos] = useState([]);
+  const [modoConflito, setModoConflito] = useState('substituir'); // 'substituir' ou 'ignorar'
+
+  // Função para extrair data do valor
+  const parseDataCompetencia = (valor) => {
+    if (!valor) return null;
+    const str = String(valor).trim();
+    
+    // Formato: MM/YYYY ou MM-YYYY
+    let match = str.match(/^(\d{1,2})[\/\-](\d{4})$/);
+    if (match) return { mes: parseInt(match[1]), ano: parseInt(match[2]) };
+    
+    // Formato: YYYY-MM ou YYYY/MM
+    match = str.match(/^(\d{4})[\/\-](\d{1,2})$/);
+    if (match) return { mes: parseInt(match[2]), ano: parseInt(match[1]) };
+    
+    // Formato: DD/MM/YYYY
+    match = str.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+    if (match) return { mes: parseInt(match[2]), ano: parseInt(match[3]) };
+    
+    // Formato: YYYY-MM-DD
+    match = str.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/);
+    if (match) return { mes: parseInt(match[2]), ano: parseInt(match[1]) };
+    
+    return null;
+  };
 
   const handleFileChange = async (e) => {
     const f = e.target.files[0];
@@ -975,17 +1046,69 @@ function UploadModal({ isOpen, onClose, empresaId, onSuccess }) {
     });
   };
 
-  const handleConfirm = async () => {
+  // Verifica conflitos de períodos antes de importar
+  const verificarConflitos = () => {
+    if (!preview || !mapping.data) return;
+    
+    // Parse completo do CSV para verificar todos os períodos
+    Papa.parse(csvContent, {
+      header: true,
+      complete: (results) => {
+        const periodosExistentes = new Set(
+          registrosExistentes.map(r => `${r.ano}-${String(r.mes).padStart(2, '0')}`)
+        );
+        
+        const conflitosEncontrados = [];
+        results.data.forEach((row, idx) => {
+          const dataValor = row[mapping.data];
+          const parsed = parseDataCompetencia(dataValor);
+          if (parsed) {
+            const chave = `${parsed.ano}-${String(parsed.mes).padStart(2, '0')}`;
+            if (periodosExistentes.has(chave)) {
+              conflitosEncontrados.push({
+                linha: idx + 2, // +2 porque header é linha 1
+                periodo: `${String(parsed.mes).padStart(2, '0')}/${parsed.ano}`,
+                ano: parsed.ano,
+                mes: parsed.mes
+              });
+            }
+          }
+        });
+        
+        if (conflitosEncontrados.length > 0) {
+          setConflitos(conflitosEncontrados);
+          setStep(3); // Vai para tela de conflitos
+        } else {
+          // Sem conflitos, importar direto
+          executarImportacao('ignorar');
+        }
+      }
+    });
+  };
+
+  const executarImportacao = async (modo) => {
     setLoading(true);
     setError('');
     try {
       const res = await api(`/empresas/${empresaId}/dados/upload/confirmar`, {
         method: 'POST',
-        body: JSON.stringify({ csv_content: csvContent, mapping, substituir_existentes: false })
+        body: JSON.stringify({ 
+          csv_content: csvContent, 
+          mapping, 
+          substituir_existentes: modo === 'substituir'
+        })
       });
       if (!res.ok) throw new Error((await res.json()).detail || 'Erro ao importar');
       const result = await res.json();
-      toast.success(`${result.registros_criados} registros importados com sucesso!`);
+      
+      let mensagem = `${result.registros_criados} registros importados`;
+      if (result.registros_atualizados > 0) {
+        mensagem += `, ${result.registros_atualizados} atualizados`;
+      }
+      if (result.registros_ignorados > 0) {
+        mensagem += `, ${result.registros_ignorados} ignorados`;
+      }
+      toast.success(mensagem + '!');
       onSuccess();
       onClose();
     } catch (err) {
@@ -995,8 +1118,21 @@ function UploadModal({ isOpen, onClose, empresaId, onSuccess }) {
     }
   };
 
+  const handleConfirm = async () => {
+    verificarConflitos();
+  };
+
   useEffect(() => {
-    if (!isOpen) { setStep(1); setFile(null); setCsvContent(''); setPreview(null); setMapping({}); setError(''); }
+    if (!isOpen) { 
+      setStep(1); 
+      setFile(null); 
+      setCsvContent(''); 
+      setPreview(null); 
+      setMapping({}); 
+      setError(''); 
+      setConflitos([]);
+      setModoConflito('substituir');
+    }
   }, [isOpen]);
 
   const campos = [
@@ -1009,6 +1145,8 @@ function UploadModal({ isOpen, onClose, empresaId, onSuccess }) {
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Importar Dados" size="lg">
       {error && <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700">{error}</div>}
+      
+      {/* Step 1: Upload */}
       {step === 1 && (
         <div className="text-center py-8">
           <input type="file" accept=".csv,.xlsx,.xls" onChange={handleFileChange} className="hidden" id="file-upload" />
@@ -1019,6 +1157,8 @@ function UploadModal({ isOpen, onClose, empresaId, onSuccess }) {
           </label>
         </div>
       )}
+      
+      {/* Step 2: Mapeamento */}
       {step === 2 && preview && (
         <div>
           <p className="text-sm text-slate-600 mb-4">Arquivo: <strong>{file?.name}</strong></p>
@@ -1037,6 +1177,76 @@ function UploadModal({ isOpen, onClose, empresaId, onSuccess }) {
           <div className="flex justify-end gap-2 mt-6">
             <Button variant="secondary" onClick={() => setStep(1)}>Voltar</Button>
             <Button onClick={handleConfirm} loading={loading} disabled={!mapping.data || !mapping.receita}>Importar</Button>
+          </div>
+        </div>
+      )}
+      
+      {/* Step 3: Conflitos detectados */}
+      {step === 3 && conflitos.length > 0 && (
+        <div>
+          <div className="mb-4 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="w-5 h-5 text-amber-600 mt-0.5" />
+              <div>
+                <h4 className="font-medium text-amber-800">Conflito de períodos detectado</h4>
+                <p className="text-sm text-amber-700 mt-1">
+                  {conflitos.length} período(s) já possui(em) dados cadastrados:
+                </p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {conflitos.slice(0, 6).map((c, i) => (
+                    <span key={i} className="px-2 py-1 bg-amber-100 text-amber-800 text-xs rounded">
+                      {c.periodo}
+                    </span>
+                  ))}
+                  {conflitos.length > 6 && (
+                    <span className="px-2 py-1 bg-amber-100 text-amber-800 text-xs rounded">
+                      +{conflitos.length - 6} mais
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          <h4 className="font-medium text-slate-900 mb-3">O que deseja fazer?</h4>
+          
+          <div className="space-y-3 mb-6">
+            <label className={`flex items-start gap-3 p-4 border rounded-lg cursor-pointer transition-colors ${modoConflito === 'substituir' ? 'border-blue-500 bg-blue-50' : 'border-slate-200 hover:border-slate-300'}`}>
+              <input 
+                type="radio" 
+                name="modoConflito" 
+                value="substituir" 
+                checked={modoConflito === 'substituir'}
+                onChange={(e) => setModoConflito(e.target.value)}
+                className="mt-1"
+              />
+              <div>
+                <p className="font-medium text-slate-900">Substituir dados existentes</p>
+                <p className="text-sm text-slate-500">Os novos dados vão sobrescrever os dados atuais nos períodos em conflito</p>
+              </div>
+            </label>
+            
+            <label className={`flex items-start gap-3 p-4 border rounded-lg cursor-pointer transition-colors ${modoConflito === 'ignorar' ? 'border-blue-500 bg-blue-50' : 'border-slate-200 hover:border-slate-300'}`}>
+              <input 
+                type="radio" 
+                name="modoConflito" 
+                value="ignorar"
+                checked={modoConflito === 'ignorar'}
+                onChange={(e) => setModoConflito(e.target.value)}
+                className="mt-1"
+              />
+              <div>
+                <p className="font-medium text-slate-900">Manter dados atuais</p>
+                <p className="text-sm text-slate-500">Os períodos em conflito serão ignorados, mantendo os dados já cadastrados</p>
+              </div>
+            </label>
+          </div>
+          
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setStep(2)}>Voltar</Button>
+            <Button onClick={() => executarImportacao(modoConflito)} loading={loading}>
+              {modoConflito === 'substituir' ? 'Substituir e Importar' : 'Importar Novos Apenas'}
+            </Button>
           </div>
         </div>
       )}
