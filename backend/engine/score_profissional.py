@@ -213,8 +213,12 @@ def calcular_zscore_altman(dados: Dict) -> Tuple[float, str]:
     1.23 < Z < 2.9: Zona cinza (moderado)
     Z < 1.23: Zona de perigo (alto risco)
     """
-    at = dados.get('ativo_total', 0) or 1  # Evita divisão por zero
-    pt = dados.get('passivo_total', 0) or 1
+    at = dados.get('ativo_total', 0) or 0
+    pt = dados.get('passivo_total', 0) or 0
+    
+    # Se não temos dados de balanço, não podemos calcular Z-Score
+    if at == 0:
+        return 0.0, "Indisponível (sem dados de balanço)"
     
     # X1: Capital de Giro / Ativo Total
     ac = dados.get('ativo_circulante', 0) or 0
