@@ -105,6 +105,8 @@ from data.database import (
     # Novas funções de segurança
     logout_all_devices, refresh_access_token, alterar_senha,
     solicitar_reset_senha, resetar_senha, listar_sessoes_ativas, revogar_sessao,
+    # Verificação de email
+    verificar_email_token, reenviar_verificacao_email,
     # Database session
     get_db
 )
@@ -827,13 +829,27 @@ async def registrar(dados: ContadorCreate, request: Request):
             cnpj=dados.cnpj,
             crc=dados.crc
         )
+        
+        # Enviar email de verificação
+        if EMAIL_SERVICE_AVAILABLE and email_service and result.get('verification_token'):
+            print(f"📧 Enviando email de verificação para {dados.email}...")
+            sent = email_service.send_email_verification(
+                to_email=dados.email,
+                verification_token=result['verification_token'],
+                user_name=dados.nome
+            )
+            print(f"📧 Resultado envio: {'✅ OK' if sent else '❌ FALHOU'}")
+        else:
+            print(f"⚠️ Email NÃO enviado: SERVICE={EMAIL_SERVICE_AVAILABLE}, service={email_service is not None}, token={'sim' if result.get('verification_token') else 'não'}")
+        
         return {
-            "message": "Conta criada com sucesso",
+            "message": "Conta criada com sucesso. Verifique seu email para ativar a conta.",
             "user": {
                 "id": result['id'],
                 "nome": result['nome'],
                 "email": result['email'],
-                "escritorio": result.get('escritorio')
+                "escritorio": result.get('escritorio'),
+                "email_verified": False
             },
             "token": result['token'],
             "refresh_token": result['refresh_token'],
@@ -939,7 +955,8 @@ async def login(dados: LoginRequest, request: Request):
             "user": {
                 "id": result['id'],
                 "nome": result['nome'],
-                "email": result['email']
+                "email": result['email'],
+                "email_verified": result.get('email_verified', True)
             },
             "token": result['token'],
             "refresh_token": result['refresh_token'],
@@ -1051,11 +1068,15 @@ async def solicitar_reset(dados: ResetSenhaRequest, request: Request):
     
     # Enviar email de recuperação
     if token and EMAIL_SERVICE_AVAILABLE and email_service:
-        email_service.send_password_reset(
+        print(f"📧 Enviando email de reset de senha para {dados.email}...")
+        sent = email_service.send_password_reset(
             to_email=dados.email,
             reset_token=token,
-            user_name=dados.email.split('@')[0]  # Nome do email como fallback
+            user_name=dados.email.split('@')[0]
         )
+        print(f"📧 Resultado envio reset: {'✅ OK' if sent else '❌ FALHOU'}")
+    else:
+        print(f"⚠️ Email reset NÃO enviado: token={'sim' if token else 'não'}, service={EMAIL_SERVICE_AVAILABLE}")
     
     response = {
         "ok": True, 
@@ -1090,6 +1111,65 @@ async def confirmar_reset(dados: ConfirmarResetSenhaRequest, request: Request):
         return {"ok": True, "message": "Senha alterada com sucesso. Faça login com a nova senha."}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/auth/verificar-email")
+async def verificar_email(request: Request):
+    """
+    Verifica email do usuário usando token enviado por email.
+    """
+    try:
+        body = await request.json()
+        token = body.get("token", "")
+        
+        if not token:
+            raise HTTPException(status_code=400, detail="Token não fornecido")
+        
+        result = verificar_email_token(token)
+        
+        if result.get('already_verified'):
+            return {"ok": True, "message": "Email já foi verificado anteriormente.", "already_verified": True}
+        
+        return {"ok": True, "message": "Email verificado com sucesso! Sua conta está ativa.", "already_verified": False}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/auth/reenviar-verificacao")
+async def reenviar_email_verificacao(request: Request):
+    """
+    Reenvia email de verificação.
+    Rate limited: 3 por 10 minutos.
+    """
+    if rate_limiter:
+        client_ip = _get_client_ip(request)
+        allowed, _ = rate_limiter.check_rate_limit(f"resend_verify:{client_ip}", 3, 600)
+        if not allowed:
+            raise HTTPException(
+                status_code=429,
+                detail="Muitas solicitações. Aguarde alguns minutos."
+            )
+    
+    try:
+        body = await request.json()
+        email_addr = body.get("email", "")
+        
+        if not email_addr:
+            raise HTTPException(status_code=400, detail="Email não fornecido")
+        
+        token = reenviar_verificacao_email(email_addr)
+        
+        if token and EMAIL_SERVICE_AVAILABLE and email_service:
+            email_service.send_email_verification(
+                to_email=email_addr,
+                verification_token=token,
+                user_name=email_addr.split('@')[0]
+            )
+        
+        # Sempre retorna sucesso (segurança - não revela se email existe)
+        return {"ok": True, "message": "Se o email existir e não estiver verificado, enviaremos um novo link."}
+    except Exception as e:
+        return {"ok": True, "message": "Se o email existir e não estiver verificado, enviaremos um novo link."}
 
 
 @app.post("/auth/verificar-senha")

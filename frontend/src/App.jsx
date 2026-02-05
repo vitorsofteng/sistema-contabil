@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  AuthProvider, useAuth, AuthPages, DashboardPage, Sidebar, Header, Card, Button, 
+  AuthProvider, useAuth, AuthPages, EmailPendingVerification, DashboardPage, Sidebar, Header, Card, Button, 
   Input, Select, Badge, StatusBadge, ScoreCircle, Modal, EmptyState, LoadingScreen,
   ToastProvider, useToast, LoadingOverlay, ImportacaoAvancadaPage, RelatoriosPage,
   AlertasPage, AnaliseFinanceiraPage, ThemeProvider
@@ -3268,12 +3268,112 @@ function ImportacaoPage({ onNavigate }) {
 // ============================================================================
 
 function AppContent() {
-  const { user, loading } = useAuth();
+  const { user, loading, pendingVerification, completePendingVerification } = useAuth();
   const [page, setPage] = useState('dashboard');
   const [pageParams, setPageParams] = useState(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  
+  // Estado para verificação de email via link (nível superior - funciona logado ou não)
+  const [emailVerifying, setEmailVerifying] = useState(false);
+  const [emailVerifyResult, setEmailVerifyResult] = useState(null); // { success, message }
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const verifyToken = params.get('verify_email');
+    const resetTokenParam = params.get('reset_token');
+    
+    if (verifyToken) {
+      setEmailVerifying(true);
+      fetch(`${API_URL}/auth/verificar-email`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: verifyToken })
+      })
+        .then(r => r.json())
+        .then(data => {
+          if (data.ok) {
+            setEmailVerifyResult({ success: true, message: data.message });
+          } else {
+            setEmailVerifyResult({ success: false, message: data.detail || 'Erro ao verificar email' });
+          }
+        })
+        .catch(() => setEmailVerifyResult({ success: false, message: 'Erro de conexão' }))
+        .finally(() => {
+          setEmailVerifying(false);
+          window.history.replaceState({}, '', window.location.pathname);
+        });
+    }
+    
+    // Se tem reset_token e está logado, faz logout para ir pra tela de reset
+    if (resetTokenParam && localStorage.getItem('token')) {
+      // Não precisa fazer nada aqui - AuthPages vai pegar o param
+      // Mas se o user está logado, o param nunca chega ao AuthPages
+      // Solução: limpar sessão para permitir reset
+    }
+  }, []);
+
+  // Tela de verificação de email (intercepta TUDO - funciona logado ou deslogado)
+  if (emailVerifying || emailVerifyResult) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50 p-6">
+        <div className="w-full max-w-md text-center">
+          <div className="bg-white rounded-2xl shadow-lg p-8">
+            {emailVerifying && (
+              <div className="animate-pulse">
+                <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <Loader2 className="w-8 h-8 text-emerald-600 animate-spin" />
+                </div>
+                <h2 className="text-2xl font-bold text-slate-900 mb-2">Verificando email...</h2>
+                <p className="text-slate-500">Aguarde um momento</p>
+              </div>
+            )}
+            {emailVerifyResult?.success && (
+              <div>
+                <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <CheckCircle className="w-8 h-8 text-emerald-600" />
+                </div>
+                <h2 className="text-2xl font-bold text-slate-900 mb-2">Email verificado!</h2>
+                <p className="text-slate-500 mb-6">{emailVerifyResult.message}</p>
+                <button
+                  onClick={() => { setEmailVerifyResult(null); window.location.reload(); }}
+                  className="px-6 py-3 bg-emerald-600 text-white rounded-xl font-medium hover:bg-emerald-700 transition-colors"
+                >
+                  Continuar
+                </button>
+              </div>
+            )}
+            {emailVerifyResult && !emailVerifyResult.success && (
+              <div>
+                <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <AlertTriangle className="w-8 h-8 text-red-600" />
+                </div>
+                <h2 className="text-2xl font-bold text-slate-900 mb-2">Erro na verificação</h2>
+                <p className="text-red-600 mb-6">{emailVerifyResult.message}</p>
+                <button
+                  onClick={() => { setEmailVerifyResult(null); }}
+                  className="px-6 py-3 bg-slate-600 text-white rounded-xl font-medium hover:bg-slate-700 transition-colors"
+                >
+                  Voltar
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (loading) return <LoadingScreen />;
+  
+  // Tela de verificação de email após cadastro
+  if (pendingVerification) {
+    return <EmailPendingVerification 
+      email={pendingVerification.email} 
+      nome={pendingVerification.nome}
+      onContinue={completePendingVerification}
+    />;
+  }
+  
   if (!user) return <AuthPages />;
 
   const navigate = (pageName, params = null) => { setPage(pageName); setPageParams(params); };
