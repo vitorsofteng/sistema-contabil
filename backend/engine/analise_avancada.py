@@ -348,11 +348,143 @@ class AnaliseAvancada:
 
 
 # =============================================================================
+# UTILITÁRIOS PARA VALORES ACUMULADOS
+# =============================================================================
+
+def _detectar_acumulados(dados_ano: List[Dict]) -> bool:
+    """Detecta se os dados de um ano são valores acumulados no exercício."""
+    if len(dados_ano) < 2:
+        return False
+    
+    # Flag explícita do parser Domínio
+    if any(d.get('_valores_acumulados', False) for d in dados_ano):
+        return True
+    
+    # Heurística: se receitas crescem monotonicamente
+    dados_sorted = sorted(dados_ano, key=lambda x: x.get('mes', 0))
+    receitas = [d.get('receita', 0) or d.get('receita_bruta', 0) or 0 for d in dados_sorted]
+    receitas_positivas = [r for r in receitas if r > 0]
+    
+    if len(receitas_positivas) >= 2:
+        crescente = all(receitas_positivas[i] <= receitas_positivas[i+1] for i in range(len(receitas_positivas)-1))
+        if crescente and receitas_positivas[0] > 0:
+            crescimento = (receitas_positivas[-1] - receitas_positivas[0]) / receitas_positivas[0]
+            if crescimento > 0.5:
+                return True
+    
+    return False
+
+
+def _obter_valor_mensal(dados_mensais: List[Dict], campo: str, campo_alt: str = None) -> List[float]:
+    """
+    Retorna valores MENSAIS reais, desacumulando se necessário.
+    Para valores acumulados: calcula diferenças entre meses consecutivos.
+    Para valores mensais: retorna como estão.
+    """
+    if not dados_mensais:
+        return []
+    
+    # Agrupa por ano
+    dados_por_ano = {}
+    for d in dados_mensais:
+        ano = d.get('ano', 0)
+        if ano not in dados_por_ano:
+            dados_por_ano[ano] = []
+        dados_por_ano[ano].append(d)
+    
+    # Campos que podem ter valores negativos mensais (lucro pode ser prejuízo)
+    campos_com_negativo = {'lucro_liquido', 'resultado_exercicio'}
+    permite_negativo = campo in campos_com_negativo
+    
+    valores_mensais = []
+    
+    for ano in sorted(dados_por_ano.keys()):
+        dados_ano = sorted(dados_por_ano[ano], key=lambda x: x.get('mes', 0))
+        acumulados = _detectar_acumulados(dados_ano)
+        
+        if acumulados and len(dados_ano) > 1:
+            prev = 0
+            for d in dados_ano:
+                val = d.get(campo, 0) or (d.get(campo_alt, 0) if campo_alt else 0) or 0
+                mensal = val - prev
+                if not permite_negativo:
+                    mensal = max(0, mensal)
+                valores_mensais.append(mensal)
+                prev = val
+        else:
+            for d in dados_ano:
+                val = d.get(campo, 0) or (d.get(campo_alt, 0) if campo_alt else 0) or 0
+                valores_mensais.append(val)
+    
+    return valores_mensais
+
+
+def _obter_totais_dre(dados_mensais: List[Dict]) -> Dict[str, float]:
+    """
+    Calcula totais corretos para DRE, tratando valores acumulados.
+    Para acumulados: usa o valor do último mês de cada ano (que é o total acumulado).
+    Para mensais: soma todos os meses.
+    """
+    if not dados_mensais:
+        return {}
+    
+    # Agrupa por ano
+    dados_por_ano = {}
+    for d in dados_mensais:
+        ano = d.get('ano', 0)
+        if ano not in dados_por_ano:
+            dados_por_ano[ano] = []
+        dados_por_ano[ano].append(d)
+    
+    campos = {
+        'receita': 'receita_bruta',
+        'custos': 'custos_total',
+        'despesas': 'despesas_operacionais',
+        'folha': 'despesas_pessoal',
+        'deducoes_receita': None,
+        'iss': None,
+        'pis': None,
+        'cofins': None,
+        'irpj': None,
+        'csll': None,
+        'impostos': 'impostos_total',
+        'despesas_administrativas': None,
+        'despesas_comerciais': None,
+        'despesas_financeiras': None,
+        'outras_despesas': None,
+        'lucro_liquido': None,
+    }
+    
+    totais = {campo: 0 for campo in campos}
+    
+    for ano in sorted(dados_por_ano.keys()):
+        dados_ano = sorted(dados_por_ano[ano], key=lambda x: x.get('mes', 0))
+        acumulados = _detectar_acumulados(dados_ano)
+        
+        if acumulados:
+            # Para acumulados, o último mês já tem o total do ano
+            ultimo = dados_ano[-1]
+            print(f"[DRE] Ano {ano}: Usando último mês ({ultimo.get('mes')}) como total acumulado")
+            for campo, campo_alt in campos.items():
+                val = ultimo.get(campo, 0) or (ultimo.get(campo_alt, 0) if campo_alt else 0) or 0
+                totais[campo] += val
+        else:
+            # Para mensais, somar tudo
+            print(f"[DRE] Ano {ano}: Somando {len(dados_ano)} meses (valores mensais)")
+            for d in dados_ano:
+                for campo, campo_alt in campos.items():
+                    val = d.get(campo, 0) or (d.get(campo_alt, 0) if campo_alt else 0) or 0
+                    totais[campo] += val
+    
+    return totais
+
+
+# =============================================================================
 # GERADORES
 # =============================================================================
 
 def gerar_dre(dados_mensais: List[Dict], periodo: str = None) -> DRE:
-    """Gera DRE a partir dos dados mensais."""
+    """Gera DRE a partir dos dados mensais, tratando valores acumulados corretamente."""
     if not dados_mensais:
         return DRE(periodo=periodo or "N/A")
     
@@ -368,26 +500,28 @@ def gerar_dre(dados_mensais: List[Dict], periodo: str = None) -> DRE:
     if not dados:
         return DRE(periodo=periodo or "N/A")
     
-    # Soma valores
-    receita = sum(d.get('receita', 0) or d.get('receita_bruta', 0) or 0 for d in dados)
-    custos = sum(d.get('custos', 0) or d.get('custos_total', 0) or 0 for d in dados)
-    despesas = sum(d.get('despesas', 0) or d.get('despesas_operacionais', 0) or 0 for d in dados)
-    folha = sum(d.get('folha', 0) or d.get('despesas_pessoal', 0) or 0 for d in dados)
+    # ============================================================
+    # USAR TOTAIS CORRETOS (desacumulados)
+    # ============================================================
+    t = _obter_totais_dre(dados)
     
-    # Impostos detalhados (se disponíveis)
-    deducoes = sum(d.get('deducoes_receita', 0) or 0 for d in dados)
-    iss = sum(d.get('iss', 0) or 0 for d in dados)
-    pis = sum(d.get('pis', 0) or 0 for d in dados)
-    cofins = sum(d.get('cofins', 0) or 0 for d in dados)
-    irpj = sum(d.get('irpj', 0) or 0 for d in dados)
-    csll = sum(d.get('csll', 0) or 0 for d in dados)
-    impostos_total = sum(d.get('impostos', 0) or d.get('impostos_total', 0) or 0 for d in dados)
+    receita = t['receita']
+    custos = t['custos']
+    despesas = t['despesas']
+    folha = t['folha']
+    deducoes = t['deducoes_receita']
+    iss = t['iss']
+    pis = t['pis']
+    cofins = t['cofins']
+    irpj = t['irpj']
+    csll = t['csll']
+    impostos_total = t['impostos']
+    desp_admin = t['despesas_administrativas']
+    desp_comercial = t['despesas_comerciais']
+    desp_financeira = t['despesas_financeiras']
+    outras_desp = t['outras_despesas']
     
-    # Despesas detalhadas (se disponíveis)
-    desp_admin = sum(d.get('despesas_administrativas', 0) or 0 for d in dados)
-    desp_comercial = sum(d.get('despesas_comerciais', 0) or 0 for d in dados)
-    desp_financeira = sum(d.get('despesas_financeiras', 0) or 0 for d in dados)
-    outras_desp = sum(d.get('outras_despesas', 0) or 0 for d in dados)
+    print(f"[DRE] Totais - Receita: R$ {receita:,.2f}, Custos: R$ {custos:,.2f}, Despesas: R$ {despesas:,.2f}, Folha: R$ {folha:,.2f}")
     
     dre = DRE(periodo=periodo or f"{dados[0].get('ano', 'N/A')}")
     
@@ -420,13 +554,21 @@ def gerar_dre(dados_mensais: List[Dict], periodo: str = None) -> DRE:
         dre.despesas_comerciais = desp_comercial
         dre.outras_despesas = outras_desp
     else:
-        # Estima distribuição
+        # Estima distribuição a partir do total de despesas
         dre.despesas_administrativas = despesas * 0.5
         dre.despesas_comerciais = despesas * 0.3
         dre.outras_despesas = despesas * 0.2
     
     dre.despesas_financeiras = desp_financeira
-    dre.total_despesas_operacionais = folha + despesas + desp_financeira
+    
+    # Total despesas = soma dos componentes detalhados (não usa campo bruto para evitar inconsistência)
+    dre.total_despesas_operacionais = (
+        dre.despesas_pessoal +
+        dre.despesas_administrativas +
+        dre.despesas_comerciais +
+        dre.outras_despesas +
+        dre.despesas_financeiras
+    )
     
     # Resultado operacional
     dre.lucro_operacional = dre.lucro_bruto - dre.total_despesas_operacionais
@@ -459,16 +601,117 @@ def calcular_indices(dados_mensais: List[Dict]) -> IndicesFinanceiros:
     ultimo = dados[-1]
     n = len(dados)
     
-    # ===== TOTAIS DO DRE =====
-    receita_total = sum(d.get('receita', 0) or d.get('receita_bruta', 0) or 0 for d in dados)
-    custos_total = sum(d.get('custos', 0) or d.get('custos_total', 0) or d.get('custo_produtos_vendidos', 0) or 0 for d in dados)
-    despesas_total = sum(d.get('despesas', 0) or d.get('despesas_operacionais', 0) or 0 for d in dados)
-    impostos_total = sum(d.get('impostos', 0) or d.get('deducoes_receita', 0) or 0 for d in dados)
-    folha_total = sum(d.get('folha', 0) or d.get('despesas_pessoal', 0) or 0 for d in dados)
+    # ============================================================
+    # TRATAMENTO DE VALORES ACUMULADOS VS MENSAIS
+    # ============================================================
+    # O balancete do Domínio mostra valores ACUMULADOS no exercício
+    # para contas de resultado (receitas, despesas, lucro).
+    #
+    # Se tivermos múltiplos meses do mesmo ano, precisamos:
+    # - Para DRE: usar o valor do ÚLTIMO mês (que tem o acumulado correto)
+    # - Para Balanço: usar o último mês (saldos são pontuais)
+    #
+    # Se tivermos meses de anos diferentes, tratamos cada ano separadamente.
+    # ============================================================
+    
+    # Agrupa por ano
+    dados_por_ano = {}
+    for d in dados:
+        ano = d.get('ano', 0)
+        if ano not in dados_por_ano:
+            dados_por_ano[ano] = []
+        dados_por_ano[ano].append(d)
+    
+    # Calcula totais considerando valores acumulados
+    receita_total = 0
+    custos_total = 0
+    despesas_total = 0
+    impostos_total = 0
+    folha_total = 0
+    lucro_liquido = 0
+    
+    for ano, dados_ano in dados_por_ano.items():
+        # Ordena por mês dentro do ano
+        dados_ano_sorted = sorted(dados_ano, key=lambda x: x.get('mes', 0))
+        
+        # ============================================================
+        # DETECÇÃO DE VALORES ACUMULADOS
+        # ============================================================
+        # Flag explícita do parser Domínio
+        valores_acumulados = any(d.get('_valores_acumulados', False) for d in dados_ano)
+        
+        # Heurística: se receitas crescem monotonicamente, provavelmente são acumuladas
+        if not valores_acumulados and len(dados_ano_sorted) >= 2:
+            receitas_ano = [d.get('receita', 0) or d.get('receita_bruta', 0) or 0 for d in dados_ano_sorted]
+            receitas_positivas = [r for r in receitas_ano if r > 0]
+            
+            if len(receitas_positivas) >= 2:
+                # Verifica se os valores crescem monotonicamente (característica de acumulado)
+                crescente = all(receitas_positivas[i] <= receitas_positivas[i+1] for i in range(len(receitas_positivas)-1))
+                
+                # Se cresce muito (mais que 50% do primeiro pro último), provavelmente acumulado
+                if crescente and receitas_positivas[0] > 0:
+                    crescimento = (receitas_positivas[-1] - receitas_positivas[0]) / receitas_positivas[0]
+                    if crescimento > 0.5:  # Cresce mais de 50%
+                        valores_acumulados = True
+                        print(f"[ANALISE] Ano {ano}: Detectado valores ACUMULADOS por heurística (crescimento {crescimento*100:.1f}%)")
+        
+        if valores_acumulados and len(dados_ano_sorted) > 1:
+            # ============================================================
+            # VALORES ACUMULADOS: Calcular diferenças entre meses
+            # ============================================================
+            print(f"[ANALISE] Ano {ano}: {len(dados_ano_sorted)} meses com valores ACUMULADOS")
+            
+            prev_receita = 0
+            prev_custos = 0
+            prev_despesas = 0
+            prev_impostos = 0
+            prev_folha = 0
+            prev_lucro = 0
+            
+            for d in dados_ano_sorted:
+                rec = d.get('receita', 0) or d.get('receita_bruta', 0) or 0
+                cus = d.get('custos', 0) or d.get('custos_total', 0) or 0
+                des = d.get('despesas', 0) or d.get('despesas_operacionais', 0) or 0
+                imp = d.get('impostos', 0) or d.get('deducoes_receita', 0) or 0
+                fol = d.get('folha', 0) or 0
+                luc = d.get('lucro_liquido', 0) or 0
+                
+                # Valor mensal = Acumulado atual - Acumulado anterior
+                receita_total += max(0, rec - prev_receita)
+                custos_total += max(0, cus - prev_custos)
+                despesas_total += max(0, des - prev_despesas)
+                impostos_total += max(0, imp - prev_impostos)
+                folha_total += max(0, fol - prev_folha)
+                # Lucro pode ser negativo em meses individuais (prejuízo)
+                lucro_liquido += luc - prev_lucro
+                
+                prev_receita = rec
+                prev_custos = cus
+                prev_despesas = des
+                prev_impostos = imp
+                prev_folha = fol
+                prev_lucro = luc
+        else:
+            # ============================================================
+            # VALORES MENSAIS: Somar normalmente
+            # ============================================================
+            print(f"[ANALISE] Ano {ano}: {len(dados_ano_sorted)} meses com valores MENSAIS")
+            
+            for d in dados_ano_sorted:
+                receita_total += d.get('receita', 0) or d.get('receita_bruta', 0) or 0
+                custos_total += d.get('custos', 0) or d.get('custos_total', 0) or 0
+                despesas_total += d.get('despesas', 0) or d.get('despesas_operacionais', 0) or 0
+                impostos_total += d.get('impostos', 0) or d.get('deducoes_receita', 0) or 0
+                folha_total += d.get('folha', 0) or 0
+                lucro_liquido += d.get('lucro_liquido', 0) or 0
+    
+    print(f"[ANALISE] Totais calculados - Receita: R$ {receita_total:,.2f}, Lucro: R$ {lucro_liquido:,.2f}")
     
     lucro_bruto = receita_total - custos_total
     lucro_operacional = lucro_bruto - despesas_total - folha_total
-    lucro_liquido = sum(d.get('lucro_liquido', 0) or 0 for d in dados)
+    
+    # Se lucro_liquido não foi calculado, estimar
     if lucro_liquido == 0:
         lucro_liquido = receita_total - custos_total - despesas_total - impostos_total - folha_total
     
@@ -689,17 +932,27 @@ def calcular_indices(dados_mensais: List[Dict]) -> IndicesFinanceiros:
 
 
 def calcular_break_even(dados_mensais: List[Dict], custo_fixo_pct: float = None) -> BreakEven:
-    """Calcula ponto de equilíbrio."""
+    """Calcula ponto de equilíbrio, tratando valores acumulados."""
     if not dados_mensais:
         return BreakEven()
     
     n = len(dados_mensais)
     
-    # Médias mensais
-    receita_media = sum(d.get('receita', 0) or 0 for d in dados_mensais) / n
-    custos_media = sum(d.get('custos', 0) or 0 for d in dados_mensais) / n
-    despesas_media = sum(d.get('despesas', 0) or 0 for d in dados_mensais) / n
-    folha_media = sum(d.get('folha', 0) or 0 for d in dados_mensais) / n
+    # ============================================================
+    # OBTER VALORES MENSAIS REAIS (desacumulados se necessário)
+    # ============================================================
+    receitas_mensais = _obter_valor_mensal(dados_mensais, 'receita', 'receita_bruta')
+    custos_mensais = _obter_valor_mensal(dados_mensais, 'custos', 'custos_total')
+    despesas_mensais = _obter_valor_mensal(dados_mensais, 'despesas', 'despesas_operacionais')
+    folha_mensais = _obter_valor_mensal(dados_mensais, 'folha', 'despesas_pessoal')
+    
+    # Médias mensais REAIS
+    receita_media = sum(receitas_mensais) / n if n > 0 else 0
+    custos_media = sum(custos_mensais) / n if n > 0 else 0
+    despesas_media = sum(despesas_mensais) / n if n > 0 else 0
+    folha_media = sum(folha_mensais) / n if n > 0 else 0
+    
+    print(f"[BREAK-EVEN] Médias mensais - Receita: R$ {receita_media:,.2f}, Custos: R$ {custos_media:,.2f}, Despesas: R$ {despesas_media:,.2f}, Folha: R$ {folha_media:,.2f}")
     
     be = BreakEven()
     be.receita_media_mensal = receita_media
@@ -739,7 +992,7 @@ def calcular_break_even(dados_mensais: List[Dict], custo_fixo_pct: float = None)
 
 
 def gerar_projecoes(dados_mensais: List[Dict], meses: int = 12) -> List[Projecao]:
-    """Gera projeções em 3 cenários."""
+    """Gera projeções em 3 cenários, tratando valores acumulados."""
     if len(dados_mensais) < 3:
         return []
     
@@ -747,23 +1000,39 @@ def gerar_projecoes(dados_mensais: List[Dict], meses: int = 12) -> List[Projecao
     dados = sorted(dados_mensais, key=lambda x: (x.get('ano', 0), x.get('mes', 0)))
     ultimo = dados[-1]
     
-    # Médias recentes (últimos 6 meses ou todos se menos)
-    recentes = dados[-6:] if len(dados) >= 6 else dados
-    n = len(recentes)
+    # ============================================================
+    # OBTER VALORES MENSAIS REAIS (desacumulados se necessário)
+    # ============================================================
+    receitas_mensais = _obter_valor_mensal(dados_mensais, 'receita', 'receita_bruta')
+    custos_mensais = _obter_valor_mensal(dados_mensais, 'custos', 'custos_total')
+    despesas_mensais = _obter_valor_mensal(dados_mensais, 'despesas', 'despesas_operacionais')
+    impostos_mensais = _obter_valor_mensal(dados_mensais, 'impostos', 'deducoes_receita')
+    folha_mensais = _obter_valor_mensal(dados_mensais, 'folha', 'despesas_pessoal')
     
-    receita_media = sum(d.get('receita', 0) or 0 for d in recentes) / n
-    custos_media = sum(d.get('custos', 0) or 0 for d in recentes) / n
-    despesas_media = sum(d.get('despesas', 0) or 0 for d in recentes) / n
-    impostos_media = sum(d.get('impostos', 0) or 0 for d in recentes) / n
-    folha_media = sum(d.get('folha', 0) or 0 for d in recentes) / n
+    # Médias recentes (últimos 6 meses ou todos se menos)
+    n_recentes = min(6, len(receitas_mensais))
+    recentes_rec = receitas_mensais[-n_recentes:] if receitas_mensais else [0]
+    recentes_cus = custos_mensais[-n_recentes:] if custos_mensais else [0]
+    recentes_des = despesas_mensais[-n_recentes:] if despesas_mensais else [0]
+    recentes_imp = impostos_mensais[-n_recentes:] if impostos_mensais else [0]
+    recentes_fol = folha_mensais[-n_recentes:] if folha_mensais else [0]
+    
+    n = len(recentes_rec) or 1
+    receita_media = sum(recentes_rec) / n
+    custos_media = sum(recentes_cus) / n
+    despesas_media = sum(recentes_des) / n
+    impostos_media = sum(recentes_imp) / n
+    folha_media = sum(recentes_fol) / n
     caixa_atual = ultimo.get('caixa', 0) or 0
     
-    # Calcula tendência histórica
-    if len(dados) >= 6:
-        receita_inicio = sum(d.get('receita', 0) or 0 for d in dados[:3]) / 3
-        receita_fim = sum(d.get('receita', 0) or 0 for d in dados[-3:]) / 3
+    print(f"[PROJEÇÕES] Médias mensais recentes ({n} meses) - Receita: R$ {receita_media:,.2f}, Custos: R$ {custos_media:,.2f}")
+    
+    # Calcula tendência histórica a partir dos valores mensais reais
+    if len(receitas_mensais) >= 6:
+        receita_inicio = sum(receitas_mensais[:3]) / 3
+        receita_fim = sum(receitas_mensais[-3:]) / 3
         tendencia = ((receita_fim - receita_inicio) / receita_inicio) if receita_inicio > 0 else 0
-        tendencia_mensal = tendencia / (len(dados) - 3) if len(dados) > 3 else 0
+        tendencia_mensal = tendencia / (len(receitas_mensais) - 3) if len(receitas_mensais) > 3 else 0
     else:
         tendencia_mensal = 0
     

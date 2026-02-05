@@ -5,7 +5,8 @@ import {
   ChevronRight, ArrowUpRight, ArrowDownRight, Minus, FileText, Upload,
   Calendar, DollarSign, PieChart as PieChartIcon, Activity, RefreshCw, Download, Eye,
   Edit, Trash2, CheckCircle, XCircle, Clock, Menu, X, Home, FileSpreadsheet,
-  ChevronDown, AlertCircle, Info, Loader2, Check, ArrowLeft, Target, Lightbulb
+  ChevronDown, AlertCircle, Info, Loader2, Check, ArrowLeft, Target, Lightbulb,
+  Award, Shield, Lock
 } from 'lucide-react';
 import { 
   LineChart, Line, AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
@@ -803,41 +804,26 @@ function LoginPage({ onToggle, onForgot }) {
             </button>
           </form>
           
-          <div className="mt-8">
-            <div className="relative">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-slate-200"></div>
-              </div>
-              <div className="relative flex justify-center text-sm">
-                <span className="px-4 bg-slate-50 text-slate-500">ou continue com</span>
-              </div>
-            </div>
-            
-            <div className="mt-4 grid grid-cols-2 gap-3">
-              <button className="flex items-center justify-center gap-2 py-3 px-4 border border-slate-200 rounded-xl hover:bg-slate-100 transition-colors">
-                <svg className="w-5 h-5" viewBox="0 0 24 24">
-                  <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-                  <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-                  <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
-                  <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
-                </svg>
-                <span className="text-sm font-medium text-slate-700">Google</span>
-              </button>
-              <button className="flex items-center justify-center gap-2 py-3 px-4 border border-slate-200 rounded-xl hover:bg-slate-100 transition-colors">
-                <svg className="w-5 h-5" fill="#1877F2" viewBox="0 0 24 24">
-                  <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
-                </svg>
-                <span className="text-sm font-medium text-slate-700">Facebook</span>
-              </button>
-            </div>
-          </div>
-          
           <p className="mt-8 text-center text-sm text-slate-500">
             Não tem uma conta?{' '}
             <button onClick={onToggle} className="text-emerald-600 font-semibold hover:text-emerald-700">
               Criar conta grátis
             </button>
           </p>
+          
+          {/* Trust badges */}
+          <div className="mt-8 pt-8 border-t border-slate-200">
+            <div className="flex items-center justify-center gap-6 text-slate-400">
+              <div className="flex items-center gap-2 text-xs">
+                <Shield className="w-4 h-4" />
+                <span>Dados criptografados</span>
+              </div>
+              <div className="flex items-center gap-2 text-xs">
+                <Lock className="w-4 h-4" />
+                <span>Acesso seguro</span>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -846,7 +832,15 @@ function LoginPage({ onToggle, onForgot }) {
 
 function RegisterPage({ onToggle }) {
   const { register } = useAuth();
-  const [form, setForm] = useState({ nome: '', email: '', senha: '', telefone: '' });
+  const [form, setForm] = useState({ 
+    nome: '', 
+    email: '', 
+    senha: '', 
+    telefone: '',
+    escritorio: '',
+    cnpj: '',
+    crc: ''
+  });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -878,6 +872,26 @@ function RegisterPage({ onToggle }) {
     return 'Muito forte';
   };
 
+  // Formatar CNPJ
+  const formatCNPJ = (value) => {
+    const numbers = value.replace(/\D/g, '').slice(0, 14);
+    return numbers.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, '$1.$2.$3/$4-$5')
+                  .replace(/(\d{2})(\d{3})(\d{3})(\d{4})/, '$1.$2.$3/$4')
+                  .replace(/(\d{2})(\d{3})(\d{3})/, '$1.$2.$3')
+                  .replace(/(\d{2})(\d{3})/, '$1.$2');
+  };
+
+  // Formatar telefone
+  const formatPhone = (value) => {
+    const numbers = value.replace(/\D/g, '').slice(0, 11);
+    if (numbers.length <= 10) {
+      return numbers.replace(/(\d{2})(\d{4})(\d{4})/, '($1) $2-$3')
+                    .replace(/(\d{2})(\d{4})/, '($1) $2');
+    }
+    return numbers.replace(/(\d{2})(\d{5})(\d{4})/, '($1) $2-$3')
+                  .replace(/(\d{2})(\d{5})/, '($1) $2');
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
@@ -890,12 +904,30 @@ function RegisterPage({ onToggle }) {
     setLoading(true);
     
     try {
-      await register(form);
+      // Enviar dados completos
+      await register({
+        nome: form.nome,
+        email: form.email,
+        senha: form.senha,
+        telefone: form.telefone,
+        escritorio: form.escritorio,
+        cnpj: form.cnpj.replace(/\D/g, ''),
+        crc: form.crc
+      });
     } catch (err) {
       setError(err.message);
     } finally {
       setLoading(false);
     }
+  };
+
+  const canProceedStep1 = form.nome.trim().length >= 3 && form.email.includes('@');
+  const canProceedStep2 = form.escritorio.trim().length >= 2;
+
+  const stepTitles = {
+    1: { title: 'Dados Pessoais', subtitle: 'Informações do responsável pela conta' },
+    2: { title: 'Dados do Escritório', subtitle: 'Informações do seu escritório contábil' },
+    3: { title: 'Criar Senha', subtitle: 'Defina uma senha segura para sua conta' }
   };
 
   return (
@@ -916,15 +948,22 @@ function RegisterPage({ onToggle }) {
             </div>
           </div>
 
-          <div className="text-center lg:text-left mb-8">
-            <h2 className="text-3xl font-bold text-slate-900">Criar conta</h2>
-            <p className="text-slate-500 mt-2">Comece gratuitamente em segundos</p>
+          <div className="text-center lg:text-left mb-6">
+            <div className="flex items-center gap-2 text-emerald-600 text-sm font-medium mb-2">
+              <span className="w-6 h-6 rounded-full bg-emerald-100 flex items-center justify-center text-xs">
+                {step}
+              </span>
+              <span>Etapa {step} de 3</span>
+            </div>
+            <h2 className="text-3xl font-bold text-slate-900">{stepTitles[step].title}</h2>
+            <p className="text-slate-500 mt-2">{stepTitles[step].subtitle}</p>
           </div>
 
           {/* Progress Steps */}
           <div className="flex items-center gap-2 mb-8">
-            <div className={`flex-1 h-1 rounded-full ${step >= 1 ? 'bg-emerald-500' : 'bg-slate-200'}`}></div>
-            <div className={`flex-1 h-1 rounded-full ${step >= 2 ? 'bg-emerald-500' : 'bg-slate-200'}`}></div>
+            <div className={`flex-1 h-1.5 rounded-full transition-colors ${step >= 1 ? 'bg-emerald-500' : 'bg-slate-200'}`}></div>
+            <div className={`flex-1 h-1.5 rounded-full transition-colors ${step >= 2 ? 'bg-emerald-500' : 'bg-slate-200'}`}></div>
+            <div className={`flex-1 h-1.5 rounded-full transition-colors ${step >= 3 ? 'bg-emerald-500' : 'bg-slate-200'}`}></div>
           </div>
           
           {error && (
@@ -938,45 +977,54 @@ function RegisterPage({ onToggle }) {
           )}
           
           <form onSubmit={handleSubmit} className="space-y-5">
-            {step === 1 ? (
+            {/* ETAPA 1: Dados Pessoais */}
+            {step === 1 && (
               <>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-2">Nome completo</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">
+                    Nome completo <span className="text-red-500">*</span>
+                  </label>
                   <div className="relative">
                     <input
                       type="text"
                       value={form.nome}
                       onChange={e => setForm({...form, nome: e.target.value})}
-                      placeholder="João da Silva"
+                      placeholder="Seu nome completo"
                       required
                       className="w-full px-4 py-3 pl-11 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
                     />
                     <User className="w-5 h-5 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
                   </div>
+                  <p className="text-xs text-slate-500 mt-1.5">Nome do contador ou responsável pela conta</p>
                 </div>
                 
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-2">Email profissional</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">
+                    Email profissional <span className="text-red-500">*</span>
+                  </label>
                   <div className="relative">
                     <input
                       type="email"
                       value={form.email}
                       onChange={e => setForm({...form, email: e.target.value})}
-                      placeholder="seu@email.com"
+                      placeholder="contador@escritorio.com.br"
                       required
                       className="w-full px-4 py-3 pl-11 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
                     />
                     <FileText className="w-5 h-5 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
                   </div>
+                  <p className="text-xs text-slate-500 mt-1.5">Será usado para login e comunicações importantes</p>
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-2">Telefone (opcional)</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">
+                    Telefone / WhatsApp
+                  </label>
                   <div className="relative">
                     <input
                       type="tel"
                       value={form.telefone}
-                      onChange={e => setForm({...form, telefone: e.target.value})}
+                      onChange={e => setForm({...form, telefone: formatPhone(e.target.value)})}
                       placeholder="(11) 99999-9999"
                       className="w-full px-4 py-3 pl-11 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
                     />
@@ -986,18 +1034,118 @@ function RegisterPage({ onToggle }) {
 
                 <button
                   type="button"
-                  onClick={() => form.nome && form.email ? setStep(2) : null}
-                  disabled={!form.nome || !form.email}
+                  onClick={() => canProceedStep1 && setStep(2)}
+                  disabled={!canProceedStep1}
                   className="w-full py-3 px-4 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white font-semibold rounded-xl shadow-lg shadow-emerald-500/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                 >
                   Continuar
                   <ChevronRight className="w-5 h-5" />
                 </button>
               </>
-            ) : (
+            )}
+
+            {/* ETAPA 2: Dados do Escritório */}
+            {step === 2 && (
               <>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-2">Criar senha</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">
+                    Nome do Escritório <span className="text-red-500">*</span>
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={form.escritorio}
+                      onChange={e => setForm({...form, escritorio: e.target.value})}
+                      placeholder="Nome do seu escritório contábil"
+                      required
+                      className="w-full px-4 py-3 pl-11 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
+                    />
+                    <Building2 className="w-5 h-5 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
+                  </div>
+                  <p className="text-xs text-slate-500 mt-1.5">Razão social ou nome fantasia do escritório</p>
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">
+                    CNPJ do Escritório
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={form.cnpj}
+                      onChange={e => setForm({...form, cnpj: formatCNPJ(e.target.value)})}
+                      placeholder="00.000.000/0000-00"
+                      className="w-full px-4 py-3 pl-11 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
+                    />
+                    <FileText className="w-5 h-5 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">
+                    Registro CRC
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={form.crc}
+                      onChange={e => setForm({...form, crc: e.target.value.toUpperCase()})}
+                      placeholder="CRC-SP 123456/O-7"
+                      className="w-full px-4 py-3 pl-11 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
+                    />
+                    <Award className="w-5 h-5 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
+                  </div>
+                  <p className="text-xs text-slate-500 mt-1.5">Registro no Conselho Regional de Contabilidade (opcional)</p>
+                </div>
+
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setStep(1)}
+                    className="flex-1 py-3 px-4 border border-slate-200 text-slate-700 font-semibold rounded-xl hover:bg-slate-100 transition-all flex items-center justify-center gap-2"
+                  >
+                    <ArrowLeft className="w-5 h-5" />
+                    Voltar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => canProceedStep2 && setStep(3)}
+                    disabled={!canProceedStep2}
+                    className="flex-1 py-3 px-4 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white font-semibold rounded-xl shadow-lg shadow-emerald-500/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                  >
+                    Continuar
+                    <ChevronRight className="w-5 h-5" />
+                  </button>
+                </div>
+              </>
+            )}
+
+            {/* ETAPA 3: Senha */}
+            {step === 3 && (
+              <>
+                {/* Resumo dos dados */}
+                <div className="bg-slate-100 rounded-xl p-4 mb-2">
+                  <p className="text-xs text-slate-500 uppercase tracking-wide font-medium mb-2">Resumo do cadastro</p>
+                  <div className="space-y-1.5 text-sm">
+                    <div className="flex items-center gap-2">
+                      <User className="w-4 h-4 text-slate-400" />
+                      <span className="text-slate-700">{form.nome}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Building2 className="w-4 h-4 text-slate-400" />
+                      <span className="text-slate-700">{form.escritorio}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <FileText className="w-4 h-4 text-slate-400" />
+                      <span className="text-slate-700">{form.email}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">
+                    Criar senha <span className="text-red-500">*</span>
+                  </label>
                   <div className="relative">
                     <input
                       type={showPassword ? 'text' : 'password'}
@@ -1007,7 +1155,7 @@ function RegisterPage({ onToggle }) {
                       required
                       className="w-full px-4 py-3 pl-11 pr-11 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
                     />
-                    <Settings className="w-5 h-5 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
+                    <Lock className="w-5 h-5 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
                     <button
                       type="button"
                       onClick={() => setShowPassword(!showPassword)}
@@ -1057,7 +1205,7 @@ function RegisterPage({ onToggle }) {
                 <div className="flex gap-3">
                   <button
                     type="button"
-                    onClick={() => setStep(1)}
+                    onClick={() => setStep(2)}
                     className="flex-1 py-3 px-4 border border-slate-200 text-slate-700 font-semibold rounded-xl hover:bg-slate-100 transition-all flex items-center justify-center gap-2"
                   >
                     <ArrowLeft className="w-5 h-5" />
@@ -1085,12 +1233,18 @@ function RegisterPage({ onToggle }) {
             )}
           </form>
           
-          <div className="mt-8 p-4 bg-slate-100 rounded-xl">
+          {/* Info box */}
+          <div className="mt-6 p-4 bg-emerald-50 border border-emerald-200 rounded-xl">
             <div className="flex items-start gap-3">
-              <CheckCircle className="w-5 h-5 text-emerald-500 flex-shrink-0 mt-0.5" />
+              <CheckCircle className="w-5 h-5 text-emerald-600 flex-shrink-0 mt-0.5" />
               <div className="text-sm">
-                <p className="font-medium text-slate-700">Teste grátis por 14 dias</p>
-                <p className="text-slate-500 mt-1">Sem cartão de crédito. Cancele quando quiser.</p>
+                <p className="font-medium text-emerald-800">Plano gratuito inclui:</p>
+                <ul className="text-emerald-700 mt-1 space-y-0.5 text-xs">
+                  <li>• Até 5 empresas cadastradas</li>
+                  <li>• Importação de balancetes ilimitada</li>
+                  <li>• Relatórios em PDF e Excel</li>
+                  <li>• Suporte por email</li>
+                </ul>
               </div>
             </div>
           </div>
@@ -4738,7 +4892,7 @@ function ImportacaoAvancadaPage({ empresaId, onSuccess }) {
           <input
             ref={fileInputRef}
             type="file"
-            accept=".csv,.xlsx,.xls,.ofx,.qif,.xml"
+            accept=".csv,.ofx,.qif,.xml"
             onChange={handleFileSelect}
             className="hidden"
           />
@@ -4749,7 +4903,7 @@ function ImportacaoAvancadaPage({ empresaId, onSuccess }) {
               {file ? file.name : 'Arraste um arquivo ou clique para selecionar'}
             </p>
             <p className="text-sm text-slate-500">
-              Formatos: CSV, Excel (.xlsx), OFX (extrato bancário), XML (NFe)
+              Formatos: CSV, OFX (extrato bancário), XML (NFe)
             </p>
             
             {file && (
@@ -5066,10 +5220,23 @@ function IndicesLiquidezTab({ analise, formatMoney, formatPct }) {
       const forn = dadosMes.fornecedores || dados.fornecedores || 0;
       const pl = dadosMes.patrimonio_liquido || dados.patrimonio_liquido || 0;
       const at = dadosMes.ativo_total || dados.ativo_total || (ac + anc) || 0;
+      const realizavelLp = dadosMes.realizavel_lp || 0;
       
       // Dados de DRE do mês
       const receita = dadosMes.receita || dadosMes.receita_bruta || 0;
       const lucro = dadosMes.lucro_liquido || 0;
+      const custos = dadosMes.custos || dadosMes.custos_total || 0;
+      
+      // Margem bruta do mês
+      const receitaLiq = receita - (dadosMes.deducoes_receita || receita * 0.10);
+      const lucroBruto = receitaLiq - custos;
+      const margemBruta = receita > 0 ? (lucroBruto / receita * 100) : (dados.margem_bruta || 0);
+      
+      // Margem operacional do mês
+      const despesas = dadosMes.despesas || dadosMes.despesas_operacionais || 0;
+      const folha = dadosMes.folha || dadosMes.despesas_pessoal || 0;
+      const lucroOp = lucroBruto - despesas - folha;
+      const margemOp = receita > 0 ? (lucroOp / receita * 100) : (dados.margem_operacional || 0);
       
       return {
         ativoCirculante: ac,
@@ -5088,7 +5255,8 @@ function IndicesLiquidezTab({ analise, formatMoney, formatPct }) {
         liquidezCorrente: pc > 0 ? ac / pc : 0,
         liquidezSeca: pc > 0 ? (ac - est) / pc : 0,
         liquidezImediata: pc > 0 ? disp / pc : 0,
-        liquidezGeral: (pc + pnc) > 0 ? (ac + anc) / (pc + pnc) : 0,
+        // Liquidez Geral: usa Realizável LP se disponível, senão apenas AC (conservador)
+        liquidezGeral: (pc + pnc) > 0 ? (ac + realizavelLp) / (pc + pnc) : 0,
         liquidezCaixa: pc > 0 ? disp / pc : 0,
         liquidezOperacional: forn > 0 ? (cr + est) / forn : 0,
         liquidezAjustada: pc > 0 ? (disp + cr * 0.7 + est * 0.3) / pc : 0,
@@ -5099,18 +5267,52 @@ function IndicesLiquidezTab({ analise, formatMoney, formatPct }) {
         roe: pl > 0 ? (lucro / pl * 100) : 0,
         roa: at > 0 ? (lucro / at * 100) : 0,
         giroAtivo: at > 0 ? receita / at : 0,
-        margemBruta: dados.margem_bruta || 0,
-        margemOperacional: dados.margem_operacional || 0,
+        margemBruta: margemBruta,
+        margemOperacional: margemOp,
         margemLiquida: receita > 0 ? (lucro / receita * 100) : 0,
       };
     } else {
-      // Modo Anual - usar médias/totais do ano
+      // Modo Anual - usar dados do backend (já calcula corretamente com desacumulação)
+      // Balanço: usa última posição do ano
       const anoAtual = ultimoMes?.ano || new Date().getFullYear();
       const dadosAno = dadosMensais.filter(d => d.ano === anoAtual);
-      const n = dadosAno.length || 1;
       
-      // Médias do balanço (última posição de cada mês, mas média para análise)
-      const ultimoDadosAno = dadosAno[dadosAno.length - 1] || {};
+      if (dadosAno.length === 0) {
+        // Fallback para dados do backend
+        return {
+          ativoCirculante: dados.ativo_circulante || 0,
+          passivoCirculante: dados.passivo_circulante || 0,
+          estoques: dados.estoques || 0,
+          disponibilidades: dados.disponibilidades || 0,
+          ativoNaoCirculante: dados.ativo_nao_circulante || 0,
+          passivoNaoCirculante: dados.passivo_nao_circulante || 0,
+          contasReceber: dados.contas_receber || 0,
+          fornecedores: dados.fornecedores || 0,
+          patrimonioLiquido: dados.patrimonio_liquido || 0,
+          ativoTotal: dados.ativo_total || 0,
+          receita: 0, lucro: 0,
+          liquidezCorrente: dados.liquidez_corrente || 0,
+          liquidezSeca: dados.liquidez_seca || 0,
+          liquidezImediata: dados.liquidez_imediata || 0,
+          liquidezGeral: dados.liquidez_geral || 0,
+          liquidezCaixa: dados.liquidez_caixa || 0,
+          liquidezOperacional: dados.liquidez_operacional || 0,
+          liquidezAjustada: dados.liquidez_ajustada || 0,
+          ncg: dados.ncg || 0,
+          saldoTesouraria: dados.saldo_tesouraria || 0,
+          capitalGiro: dados.capital_giro || 0,
+          roe: dados.roe || 0,
+          roa: dados.roa || 0,
+          giroAtivo: dados.giro_ativo || 0,
+          margemBruta: dados.margem_bruta || 0,
+          margemOperacional: dados.margem_operacional || 0,
+          margemLiquida: dados.margem_liquida || 0,
+        };
+      }
+      
+      // Ordenar e pegar último mês para dados de balanço
+      const dadosAnoSorted = [...dadosAno].sort((a, b) => (a.mes || 0) - (b.mes || 0));
+      const ultimoDadosAno = dadosAnoSorted[dadosAnoSorted.length - 1] || {};
       
       const ac = ultimoDadosAno.ativo_circulante || dados.ativo_circulante || 0;
       const pc = ultimoDadosAno.passivo_circulante || dados.passivo_circulante || 0;
@@ -5122,10 +5324,35 @@ function IndicesLiquidezTab({ analise, formatMoney, formatPct }) {
       const forn = ultimoDadosAno.fornecedores || dados.fornecedores || 0;
       const pl = ultimoDadosAno.patrimonio_liquido || dados.patrimonio_liquido || 0;
       const at = ultimoDadosAno.ativo_total || dados.ativo_total || (ac + anc) || 0;
+      const realizavelLp = ultimoDadosAno.realizavel_lp || 0;
       
-      // Totais anuais de DRE
-      const receitaAnual = dadosAno.reduce((sum, d) => sum + (d.receita || d.receita_bruta || 0), 0);
-      const lucroAnual = dadosAno.reduce((sum, d) => sum + (d.lucro_liquido || 0), 0);
+      // ============================================================
+      // TOTAIS ANUAIS - TRATAR VALORES ACUMULADOS
+      // ============================================================
+      // Detectar se dados são acumulados (receitas crescem monotonicamente)
+      const receitas = dadosAnoSorted.map(d => d.receita || d.receita_bruta || 0);
+      const receitasPositivas = receitas.filter(r => r > 0);
+      let acumulados = dadosAnoSorted.some(d => d._valores_acumulados);
+      
+      if (!acumulados && receitasPositivas.length >= 2) {
+        const crescente = receitasPositivas.every((r, i) => i === 0 || r >= receitasPositivas[i-1]);
+        if (crescente && receitasPositivas[0] > 0) {
+          const crescimento = (receitasPositivas[receitasPositivas.length - 1] - receitasPositivas[0]) / receitasPositivas[0];
+          if (crescimento > 0.5) acumulados = true;
+        }
+      }
+      
+      let receitaAnual, lucroAnual;
+      
+      if (acumulados) {
+        // Para acumulados: último mês já tem o total do ano
+        receitaAnual = ultimoDadosAno.receita || ultimoDadosAno.receita_bruta || 0;
+        lucroAnual = ultimoDadosAno.lucro_liquido || 0;
+      } else {
+        // Para mensais: somar
+        receitaAnual = dadosAno.reduce((sum, d) => sum + (d.receita || d.receita_bruta || 0), 0);
+        lucroAnual = dadosAno.reduce((sum, d) => sum + (d.lucro_liquido || 0), 0);
+      }
       
       return {
         ativoCirculante: ac,
@@ -5144,14 +5371,15 @@ function IndicesLiquidezTab({ analise, formatMoney, formatPct }) {
         liquidezCorrente: pc > 0 ? ac / pc : 0,
         liquidezSeca: pc > 0 ? (ac - est) / pc : 0,
         liquidezImediata: pc > 0 ? disp / pc : 0,
-        liquidezGeral: (pc + pnc) > 0 ? (ac + anc) / (pc + pnc) : 0,
+        // Liquidez Geral: usa Realizável LP se disponível, senão apenas AC (conservador)
+        liquidezGeral: (pc + pnc) > 0 ? (ac + realizavelLp) / (pc + pnc) : 0,
         liquidezCaixa: pc > 0 ? disp / pc : 0,
         liquidezOperacional: forn > 0 ? (cr + est) / forn : 0,
         liquidezAjustada: pc > 0 ? (disp + cr * 0.7 + est * 0.3) / pc : 0,
         ncg: (cr + est) - forn,
         saldoTesouraria: disp - ((cr + est) - forn),
         capitalGiro: ac - pc,
-        // Rentabilidade (anualizada)
+        // Rentabilidade (anualizada, corrigida)
         roe: pl > 0 ? (lucroAnual / pl * 100) : 0,
         roa: at > 0 ? (lucroAnual / at * 100) : 0,
         giroAtivo: at > 0 ? receitaAnual / at : 0,
@@ -5735,7 +5963,7 @@ function IndicesLiquidezTab({ analise, formatMoney, formatPct }) {
             
             {/* Indicadores Adicionais */}
             <Card className="p-5">
-              <h4 className="font-bold text-slate-800 mb-4">Indicadores Adicionais</h4>
+              <h4 className="font-bold text-slate-800 mb-4">Indicadores de Eficiência</h4>
               <div className="space-y-3">
                 <div className="flex justify-between items-center p-3 bg-slate-50 rounded-lg">
                   <span className="text-sm text-slate-600">Produtividade da Folha</span>
@@ -5751,6 +5979,47 @@ function IndicesLiquidezTab({ analise, formatMoney, formatPct }) {
                     {(dados.variacao_receita || 0) >= 0 ? '+' : ''}{formatPct(dados.variacao_receita)}
                   </span>
                 </div>
+              </div>
+            </Card>
+            
+            {/* Endividamento */}
+            <Card className="p-5">
+              <h4 className="font-bold text-slate-800 mb-4">Endividamento</h4>
+              <div className="space-y-4">
+                <div>
+                  <div className="flex justify-between text-sm mb-1">
+                    <span>Endividamento Geral</span>
+                    <span className={`font-semibold ${(dados.endividamento_geral || 0) > 70 ? 'text-red-600' : (dados.endividamento_geral || 0) > 50 ? 'text-yellow-600' : 'text-green-600'}`}>
+                      {formatPct(dados.endividamento_geral)}
+                    </span>
+                  </div>
+                  <div className="w-full bg-slate-200 rounded-full h-2">
+                    <div className={`h-2 rounded-full ${(dados.endividamento_geral || 0) > 70 ? 'bg-red-500' : (dados.endividamento_geral || 0) > 50 ? 'bg-yellow-500' : 'bg-green-500'}`} 
+                         style={{width: `${Math.min(dados.endividamento_geral || 0, 100)}%`}}></div>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-1">Passivo Total / Ativo Total (ideal: &lt; 50%)</p>
+                </div>
+                <div>
+                  <div className="flex justify-between text-sm mb-1">
+                    <span>Composição Endividamento</span>
+                    <span className="font-semibold">{formatPct(dados.composicao_endividamento)}</span>
+                  </div>
+                  <div className="w-full bg-slate-200 rounded-full h-2">
+                    <div className="bg-purple-500 h-2 rounded-full" style={{width: `${Math.min(dados.composicao_endividamento || 0, 100)}%`}}></div>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-1">PC / Passivo Total (% das dívidas no curto prazo)</p>
+                </div>
+                {(dados.endividamento_pl || 0) > 0 && (
+                  <div>
+                    <div className="flex justify-between text-sm mb-1">
+                      <span>Endividamento s/ PL</span>
+                      <span className={`font-semibold ${(dados.endividamento_pl || 0) > 150 ? 'text-red-600' : 'text-slate-700'}`}>
+                        {formatPct(dados.endividamento_pl)}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-500 mt-1">Passivo Total / Patrimônio Líquido</p>
+                  </div>
+                )}
               </div>
             </Card>
             
@@ -6138,7 +6407,7 @@ function AnaliseFinanceiraPage({ empresaId, empresaNome, onBack }) {
                     </tr>
                     <tr>
                       <td className="py-3 px-4 text-slate-600 pl-8">(-) Deduções</td>
-                      <td className="py-3 px-4 text-right text-red-600">{formatMoney(-analise.dre.deducoes_receita)}</td>
+                      <td className="py-3 px-4 text-right text-red-600">{formatMoney(-Math.abs(analise.dre.deducoes_receita || 0))}</td>
                     </tr>
                     <tr className="bg-slate-50">
                       <td className="py-3 px-4 font-semibold">= Receita Líquida</td>
@@ -6146,7 +6415,7 @@ function AnaliseFinanceiraPage({ empresaId, empresaNome, onBack }) {
                     </tr>
                     <tr>
                       <td className="py-3 px-4 text-slate-600 pl-8">(-) Custo das Mercadorias</td>
-                      <td className="py-3 px-4 text-right text-red-600">{formatMoney(-analise.dre.custo_produtos_vendidos)}</td>
+                      <td className="py-3 px-4 text-right text-red-600">{formatMoney(-Math.abs(analise.dre.custo_produtos_vendidos || 0))}</td>
                     </tr>
                     <tr className="bg-green-50">
                       <td className="py-3 px-4 font-semibold text-green-800">= Lucro Bruto</td>
@@ -6157,16 +6426,22 @@ function AnaliseFinanceiraPage({ empresaId, empresaNome, onBack }) {
                     </tr>
                     <tr>
                       <td className="py-3 px-4 text-slate-600 pl-8">(-) Despesas com Pessoal</td>
-                      <td className="py-3 px-4 text-right text-red-600">{formatMoney(-analise.dre.despesas_pessoal)}</td>
+                      <td className="py-3 px-4 text-right text-red-600">{formatMoney(-Math.abs(analise.dre.despesas_pessoal || 0))}</td>
                     </tr>
                     <tr>
                       <td className="py-3 px-4 text-slate-600 pl-8">(-) Despesas Administrativas</td>
-                      <td className="py-3 px-4 text-right text-red-600">{formatMoney(-analise.dre.despesas_administrativas)}</td>
+                      <td className="py-3 px-4 text-right text-red-600">{formatMoney(-Math.abs(analise.dre.despesas_administrativas || 0))}</td>
                     </tr>
                     <tr>
-                      <td className="py-3 px-4 text-slate-600 pl-8">(-) Despesas Operacionais</td>
-                      <td className="py-3 px-4 text-right text-red-600">{formatMoney(-(analise.dre.despesas_comerciais + analise.dre.outras_despesas))}</td>
+                      <td className="py-3 px-4 text-slate-600 pl-8">(-) Despesas Comerciais/Outras</td>
+                      <td className="py-3 px-4 text-right text-red-600">{formatMoney(-Math.abs((analise.dre.despesas_comerciais || 0) + (analise.dre.outras_despesas || 0)))}</td>
                     </tr>
+                    {(analise.dre.despesas_financeiras || 0) > 0 && (
+                      <tr>
+                        <td className="py-3 px-4 text-slate-600 pl-8">(-) Despesas Financeiras</td>
+                        <td className="py-3 px-4 text-right text-red-600">{formatMoney(-Math.abs(analise.dre.despesas_financeiras || 0))}</td>
+                      </tr>
+                    )}
                     <tr className="bg-blue-50">
                       <td className="py-3 px-4 font-semibold text-blue-800">= Resultado Operacional (EBIT)</td>
                       <td className="py-3 px-4 text-right font-semibold text-blue-800">
@@ -6176,7 +6451,7 @@ function AnaliseFinanceiraPage({ empresaId, empresaNome, onBack }) {
                     </tr>
                     <tr>
                       <td className="py-3 px-4 text-slate-600 pl-8">(-) Impostos</td>
-                      <td className="py-3 px-4 text-right text-red-600">{formatMoney(-analise.dre.impostos)}</td>
+                      <td className="py-3 px-4 text-right text-red-600">{formatMoney(-Math.abs(analise.dre.impostos || 0))}</td>
                     </tr>
                     <tr className={`${analise.dre.lucro_liquido >= 0 ? 'bg-green-100' : 'bg-red-100'}`}>
                       <td className="py-4 px-4 font-bold text-lg">= LUCRO LÍQUIDO</td>
@@ -6188,6 +6463,11 @@ function AnaliseFinanceiraPage({ empresaId, empresaNome, onBack }) {
                   </tbody>
                 </table>
               </div>
+              
+              {/* Nota sobre valores acumulados */}
+              <p className="text-xs text-slate-400 mt-4 text-center">
+                * Valores consolidados do período. Deduções e impostos estimados quando não disponíveis no balancete.
+              </p>
             </Card>
           )}
           

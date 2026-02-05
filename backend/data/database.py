@@ -137,6 +137,11 @@ class Contador(Base):
     senha_hash = Column(String(255), nullable=False)
     telefone = Column(String(50))
     crc = Column(String(50))
+    
+    # Dados do escritório
+    escritorio = Column(String(255))  # Nome do escritório contábil
+    cnpj = Column(String(14))  # CNPJ do escritório (só números)
+    
     ativo = Column(Boolean, default=True)
     
     # Segurança
@@ -245,6 +250,7 @@ class DadosMensal(Base):
     patrimonio_liquido = Column(Float, default=0)
     capital_social = Column(Float, default=0)
     lucros_acumulados = Column(Float, default=0)
+    dividendos_pagar = Column(Float, default=0)  # Lucros declarados mas não pagos
     
     # Campos expandidos - DRE
     receita_bruta = Column(Float, default=0)
@@ -264,6 +270,7 @@ class DadosMensal(Base):
     cofins = Column(Float, default=0)
     irpj = Column(Float, default=0)
     csll = Column(Float, default=0)
+    icms = Column(Float, default=0)  # ADICIONADO: ICMS é o maior imposto
     impostos_total = Column(Float, default=0)
     
     # Metadados
@@ -423,7 +430,7 @@ def verificar_token_blacklist(jti: str) -> bool:
 # CONTADORES (USUÁRIOS)
 # =============================================================================
 
-def criar_contador(nome: str, email: str, senha: str, telefone: str = None, crc: str = None) -> dict:
+def criar_contador(nome: str, email: str, senha: str, telefone: str = None, crc: str = None, escritorio: str = None, cnpj: str = None) -> dict:
     """Cria um novo contador."""
     
     if BCRYPT_AVAILABLE:
@@ -448,6 +455,8 @@ def criar_contador(nome: str, email: str, senha: str, telefone: str = None, crc:
             senha_hash=hash_password(senha),
             telefone=telefone,
             crc=crc,
+            escritorio=escritorio,
+            cnpj=cnpj,
             password_changed_at=datetime.now()
         )
         db.add(contador)
@@ -487,6 +496,8 @@ def criar_contador(nome: str, email: str, senha: str, telefone: str = None, crc:
             'email': contador.email,
             'telefone': contador.telefone,
             'crc': contador.crc,
+            'escritorio': contador.escritorio,
+            'cnpj': contador.cnpj,
             'token': access_token,
             'refresh_token': refresh_token,
             'expires_in': 28800
@@ -961,6 +972,21 @@ def excluir_empresa(empresa_id: int, contador_id: int):
 
 def salvar_dados_mensais(empresa_id: int, dados: Dict) -> int:
     """Salva ou atualiza dados mensais - suporta campos expandidos."""
+    
+    print(f"[DB] Salvando dados para empresa {empresa_id}")
+    print(f"[DB] Dados recebidos: {dados}")
+    
+    # Mapeia campos da IA para campos do banco
+    # Garante que os campos básicos sejam preenchidos a partir dos expandidos
+    if 'receita_bruta' in dados:
+        dados['receita'] = dados.get('receita') or dados['receita_bruta']
+    if 'despesas_operacionais' in dados:
+        dados['despesas'] = dados.get('despesas') or dados['despesas_operacionais']
+    if 'disponivel' in dados:
+        dados['caixa'] = dados.get('caixa') or dados['disponivel']
+    
+    print(f"[DB] Dados após mapeamento: receita={dados.get('receita')}, despesas={dados.get('despesas')}, caixa={dados.get('caixa')}")
+    
     with get_db() as db:
         existing = db.query(DadosMensal).filter(
             DadosMensal.empresa_id == empresa_id,
@@ -970,11 +996,15 @@ def salvar_dados_mensais(empresa_id: int, dados: Dict) -> int:
         ).first()
         
         if existing:
+            print(f"[DB] Atualizando registro existente ID={existing.id}")
             for key, value in dados.items():
                 if hasattr(existing, key) and key not in ['id', 'empresa_id', 'created_at']:
                     setattr(existing, key, value)
+            db.commit()
+            print(f"[DB] Registro atualizado com sucesso")
             return existing.id
         else:
+            print(f"[DB] Criando novo registro")
             dado = DadosMensal(
                 empresa_id=empresa_id,
                 ano=dados['ano'],
@@ -986,18 +1016,22 @@ def salvar_dados_mensais(empresa_id: int, dados: Dict) -> int:
                 impostos=dados.get('impostos', 0),
                 folha=dados.get('folha', 0),
                 caixa=dados.get('caixa', 0),
-                # Campos expandidos - Balanço
+                # Campos expandidos - Balanço Ativo
                 ativo_total=dados.get('ativo_total', 0),
                 ativo_circulante=dados.get('ativo_circulante', 0),
                 disponivel=dados.get('disponivel', 0),
                 bancos=dados.get('bancos', 0),
                 clientes=dados.get('clientes', 0),
                 estoques=dados.get('estoques', 0),
+                # Campos expandidos - Balanço Passivo
                 passivo_total=dados.get('passivo_total', 0),
                 passivo_circulante=dados.get('passivo_circulante', 0),
                 passivo_nao_circulante=dados.get('passivo_nao_circulante', 0),
+                fornecedores=dados.get('fornecedores', 0),
+                # Patrimônio Líquido
                 patrimonio_liquido=dados.get('patrimonio_liquido', 0),
                 capital_social=dados.get('capital_social', 0),
+                lucros_acumulados=dados.get('lucros_acumulados', 0),
                 # Campos expandidos - DRE
                 receita_bruta=dados.get('receita_bruta', 0),
                 receita_servicos=dados.get('receita_servicos', 0),
@@ -1013,13 +1047,15 @@ def salvar_dados_mensais(empresa_id: int, dados: Dict) -> int:
                 cofins=dados.get('cofins', dados.get('cofins_deducao', 0)),
                 irpj=dados.get('irpj', dados.get('irpj_deducao', 0)),
                 csll=dados.get('csll', dados.get('csll_deducao', 0)),
+                icms=dados.get('icms', dados.get('icms_deducao', 0)),  # ADICIONADO
                 impostos_total=dados.get('impostos_total', 0),
                 # Meta
                 observacoes=dados.get('observacoes'),
                 arquivo_origem=dados.get('arquivo_origem')
             )
             db.add(dado)
-            db.flush()
+            db.commit()
+            print(f"[DB] Novo registro criado com ID={dado.id}")
             return dado.id
 
 
@@ -1030,6 +1066,8 @@ def listar_dados_mensais(empresa_id: int, limite: int = 36) -> List[Dict]:
             DadosMensal.empresa_id == empresa_id,
             DadosMensal.deleted_at.is_(None)
         ).order_by(desc(DadosMensal.ano), desc(DadosMensal.mes)).limit(limite).all()
+        
+        print(f"[DB] Listando dados para empresa {empresa_id}: {len(dados)} registros encontrados")
         
         result = []
         for d in dados:
@@ -1045,17 +1083,29 @@ def listar_dados_mensais(empresa_id: int, limite: int = 36) -> List[Dict]:
                 'impostos': d.impostos,
                 'folha': d.folha,
                 'caixa': d.caixa,
-                'observacoes': d.observacoes
+                'observacoes': d.observacoes,
+                # Campos de auditoria para controle de novos dados
+                'created_at': d.created_at.isoformat() if hasattr(d, 'created_at') and d.created_at else None,
+                'updated_at': d.updated_at.isoformat() if hasattr(d, 'updated_at') and d.updated_at else None
             }
             
-            # Adicionar campos expandidos se existirem
+            # Adicionar TODOS os campos expandidos se existirem
             campos_expandidos = [
+                # Balanço - Ativo
                 'ativo_total', 'ativo_circulante', 'disponivel', 'bancos', 'clientes',
-                'estoques', 'passivo_total', 'passivo_circulante', 'passivo_nao_circulante',
-                'patrimonio_liquido', 'capital_social', 'receita_bruta', 'receita_servicos',
-                'deducoes_receita', 'custos_total', 'despesas_operacionais',
+                'estoques', 'ativo_nao_circulante', 'imobilizado',
+                # Balanço - Passivo
+                'passivo_total', 'passivo_circulante', 'passivo_nao_circulante',
+                'fornecedores', 'obrigacoes_trabalhistas', 'obrigacoes_tributarias',
+                'emprestimos_cp', 'emprestimos_lp',
+                # Balanço - Patrimônio
+                'patrimonio_liquido', 'capital_social', 'lucros_acumulados',
+                # DRE
+                'receita_bruta', 'receita_servicos', 'deducoes_receita', 'receita_liquida',
+                'custos_total', 'lucro_bruto', 'despesas_operacionais', 
                 'despesas_financeiras', 'receitas_financeiras', 'lucro_liquido',
-                'iss', 'pis', 'cofins', 'irpj', 'csll', 'impostos_total'
+                # Impostos detalhados
+                'iss', 'pis', 'cofins', 'irpj', 'csll', 'icms', 'impostos_total'
             ]
             
             for campo in campos_expandidos:
@@ -1064,6 +1114,7 @@ def listar_dados_mensais(empresa_id: int, limite: int = 36) -> List[Dict]:
                     item[campo] = valor
             
             result.append(item)
+            print(f"[DB] Registro {d.ano}-{d.mes:02d}: receita={d.receita}, updated_at={item['updated_at']}")
         
         return result
 
@@ -1101,7 +1152,7 @@ def obter_dados_para_analise(empresa_id: int) -> List[Dict]:
                 'receita_bruta', 'receita_servicos', 'deducoes_receita',
                 'receita_liquida', 'custos_total', 'lucro_bruto',
                 'despesas_operacionais', 'despesas_financeiras', 'receitas_financeiras',
-                'lucro_liquido', 'iss', 'pis', 'cofins', 'irpj', 'csll', 'impostos_total'
+                'lucro_liquido', 'iss', 'pis', 'cofins', 'irpj', 'csll', 'icms', 'impostos_total'
             ]
             
             for campo in campos_expandidos:

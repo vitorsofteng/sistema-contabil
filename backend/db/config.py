@@ -43,18 +43,32 @@ class DatabaseConfig:
     )
     
     # SQLite para fallback/desenvolvimento
-    SQLITE_PATH = os.environ.get('SQLITE_PATH', 'data/contabil.db')
+    SQLITE_PATH = os.environ.get('SQLITE_PATH', 'kontabil.db')
     SQLITE_URL = f"sqlite:///{SQLITE_PATH}"
     
-    # Usa PostgreSQL se disponível, senão SQLite
-    USE_POSTGRES = os.environ.get('USE_POSTGRES', 'true').lower() == 'true'
-    
+    # Detecta automaticamente se DATABASE_URL é SQLite
     @classmethod
     def get_database_url(cls) -> str:
         """Retorna URL do banco baseado na configuração."""
-        if cls.USE_POSTGRES:
+        db_url = os.environ.get('DATABASE_URL', '')
+        
+        # Se DATABASE_URL começa com sqlite, usa direto
+        if db_url.startswith('sqlite'):
+            return db_url
+        
+        # Se tem DATABASE_URL válido (postgres), usa
+        if db_url and 'postgresql' in db_url:
+            return db_url
+        
+        # Se USE_POSTGRES=true e tem config, tenta postgres
+        if cls.USE_POSTGRES and cls.POSTGRES_HOST:
             return cls.POSTGRES_URL
+        
+        # Fallback para SQLite
         return cls.SQLITE_URL
+    
+    # Usa PostgreSQL se disponível, senão SQLite
+    USE_POSTGRES = os.environ.get('USE_POSTGRES', 'false').lower() == 'true'
     
     # Pool settings (PostgreSQL)
     POOL_SIZE = int(os.environ.get('DB_POOL_SIZE', '10'))

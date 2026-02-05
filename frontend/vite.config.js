@@ -9,8 +9,8 @@ export default defineConfig({
     proxy: {
       '/api': {
         target: process.env.DOCKER === 'true' ? 'http://backend:8000' : 'http://localhost:8000',
-        changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api/, '')
+        changeOrigin: true
+        // Removido rewrite - endpoints já têm /api
       }
     }
   },

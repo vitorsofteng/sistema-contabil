@@ -8,9 +8,10 @@ import {
 import { 
   Plus, Search, Upload, Download, Eye, Edit, Trash2, RefreshCw, ChevronRight,
   Building2, FileText, Calendar, TrendingUp, TrendingDown, Minus, AlertTriangle,
-  CheckCircle, Bell, ArrowLeft, FileSpreadsheet, Loader2, BarChart3, X, PieChart
+  CheckCircle, Bell, ArrowLeft, FileSpreadsheet, Loader2, BarChart3, X, PieChart, Check, Info
 } from 'lucide-react';
 import Papa from 'papaparse';
+import RevisaoImportacao from './RevisaoImportacao.jsx';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 
@@ -137,10 +138,52 @@ function NovaEmpresaPage({ onNavigate }) {
   const toast = useToast();
   const [form, setForm] = useState({
     razao_social: '', nome_fantasia: '', cnpj: '', regime_tributario: '',
-    setor: '', email: '', telefone: '', cidade: '', estado: ''
+    setor: '', email: '', telefone: '', cidade: '', estado: '', sistema_contabil: 0
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [sistemasContabeis, setSistemasContabeis] = useState([]);
+  const [buscaSistema, setBuscaSistema] = useState('');
+  const [showSistemaDropdown, setShowSistemaDropdown] = useState(false);
+  const [loadingSistemas, setLoadingSistemas] = useState(true);
+
+  // Carregar lista de sistemas contábeis
+  useEffect(() => {
+    loadSistemasContabeis();
+  }, []);
+
+  const loadSistemasContabeis = async (busca = '') => {
+    try {
+      const url = busca 
+        ? `/api/sistemas-contabeis?busca=${encodeURIComponent(busca)}`
+        : '/api/sistemas-contabeis';
+      const res = await api(url);
+      if (res.ok) {
+        const data = await res.json();
+        setSistemasContabeis(data.sistemas || []);
+      }
+    } catch (err) {
+      console.error('Erro ao carregar sistemas:', err);
+      // Fallback local
+      setSistemasContabeis([
+        { id: 0, nome: 'Outro / Não sei', fabricante: 'Genérico', tem_parser: false, label: 'Outro / Não sei' },
+        { id: 1, nome: 'Domínio Sistemas', fabricante: 'Thomson Reuters', tem_parser: true, label: 'Domínio Sistemas (Thomson Reuters)' },
+      ]);
+    } finally {
+      setLoadingSistemas(false);
+    }
+  };
+
+  // Filtrar sistemas localmente enquanto digita
+  const sistemasFiltrados = buscaSistema
+    ? sistemasContabeis.filter(s => 
+        s.nome.toLowerCase().includes(buscaSistema.toLowerCase()) ||
+        s.fabricante.toLowerCase().includes(buscaSistema.toLowerCase())
+      )
+    : sistemasContabeis;
+
+  // Sistema selecionado
+  const sistemaSelecionado = sistemasContabeis.find(s => s.id === form.sistema_contabil);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -212,6 +255,77 @@ function NovaEmpresaPage({ onNavigate }) {
             <Input label="Setor/Atividade" value={form.setor} onChange={e => setForm({...form, setor: e.target.value})} placeholder="Ex: Comércio, Serviços..." />
           </div>
           
+          {/* Sistema Contábil - Dropdown com busca */}
+          <div className="relative">
+            <label className="block text-sm font-medium text-slate-700 mb-1">
+              Sistema Contábil para Balancetes
+            </label>
+            <div className="relative">
+              <input
+                type="text"
+                value={showSistemaDropdown ? buscaSistema : (sistemaSelecionado?.label || 'Selecione o sistema...')}
+                onChange={e => {
+                  setBuscaSistema(e.target.value);
+                  setShowSistemaDropdown(true);
+                }}
+                onFocus={() => setShowSistemaDropdown(true)}
+                placeholder="Digite para buscar..."
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+              <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            </div>
+            
+            {showSistemaDropdown && (
+              <div className="absolute z-50 w-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-60 overflow-auto">
+                {loadingSistemas ? (
+                  <div className="p-3 text-center text-slate-500">Carregando...</div>
+                ) : sistemasFiltrados.length > 0 ? (
+                  sistemasFiltrados.map(sistema => (
+                    <div
+                      key={sistema.id}
+                      onClick={() => {
+                        setForm({...form, sistema_contabil: sistema.id});
+                        setBuscaSistema('');
+                        setShowSistemaDropdown(false);
+                      }}
+                      className={`px-3 py-2 cursor-pointer hover:bg-blue-50 flex items-center justify-between ${
+                        form.sistema_contabil === sistema.id ? 'bg-blue-50' : ''
+                      }`}
+                    >
+                      <div>
+                        <div className="font-medium text-slate-900">{sistema.nome}</div>
+                        <div className="text-xs text-slate-500">{sistema.fabricante}</div>
+                      </div>
+                      {sistema.tem_parser && (
+                        <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded">
+                          Parser local
+                        </span>
+                      )}
+                    </div>
+                  ))
+                ) : (
+                  <div className="p-3 text-center text-slate-500">Nenhum sistema encontrado</div>
+                )}
+              </div>
+            )}
+            
+            {sistemaSelecionado && (
+              <p className="mt-1 text-xs text-slate-500">
+                {sistemaSelecionado.tem_parser 
+                  ? '✓ Importação automática disponível (grátis e instantânea)'
+                  : '○ Importação via IA (pode ter custo)'}
+              </p>
+            )}
+          </div>
+          
+          {/* Overlay para fechar dropdown ao clicar fora */}
+          {showSistemaDropdown && (
+            <div 
+              className="fixed inset-0 z-40" 
+              onClick={() => setShowSistemaDropdown(false)}
+            />
+          )}
+          
           <div className="grid grid-cols-2 gap-4">
             <Input label="Email" type="email" value={form.email} onChange={e => setForm({...form, email: e.target.value})} />
             <Input label="Telefone" value={form.telefone} onChange={e => setForm({...form, telefone: e.target.value})} />
@@ -247,12 +361,30 @@ function EmpresaDetailPage({ empresaId, onNavigate }) {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [tab, setTab] = useState('visao-geral');
-  const [temNovossDados, setTemNovosDados] = useState(false); // Controla se há novos dados desde última análise
+  const [temNovosDados, setTemNovosDados] = useState(false); // Controla se há novos dados desde última análise
+  const [dataUltimoLoad, setDataUltimoLoad] = useState(null); // Controla quando foi o último load
 
-  useEffect(() => { loadData(); }, [empresaId]);
+  // Recarregar dados sempre que a página for acessada (não apenas quando empresaId muda)
+  useEffect(() => { 
+    loadData(); 
+    // Marcar timestamp do load para debug
+    setDataUltimoLoad(new Date().toISOString());
+  }, [empresaId]);
+  
+  // Também recarregar quando o usuário volta para esta página (foco na janela)
+  useEffect(() => {
+    const handleFocus = () => {
+      console.log('[EMPRESA] Janela ganhou foco, recarregando dados...');
+      loadData();
+    };
+    
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
+  }, [empresaId]);
 
   const loadData = async () => {
     setLoading(true);
+    console.log('[EMPRESA] Carregando dados da empresa', empresaId);
     try {
       const [empRes, regRes, anaRes] = await Promise.all([
         api(`/empresas/${empresaId}`),
@@ -269,6 +401,8 @@ function EmpresaDetailPage({ empresaId, onNavigate }) {
         const dadosList = regData.dados || regData || [];
         setRegistros(dadosList);
         
+        console.log('[EMPRESA] Dados carregados:', dadosList.length, 'registros');
+        
         // Verificar se há dados mais recentes que a última análise
         if (anaRes.ok) {
           const anaData = await anaRes.json();
@@ -279,15 +413,37 @@ function EmpresaDetailPage({ empresaId, onNavigate }) {
             setUltimaAnalise(analisesList[0]);
             const dataUltimaAnalise = new Date(analisesList[0].data_analise);
             
+            console.log('[EMPRESA] Última análise em:', analisesList[0].data_analise);
+            
             // Verificar se algum dado foi criado/atualizado após a última análise
             const temDadosNovos = dadosList.some(d => {
-              const dataAtualizacao = d.updated_at ? new Date(d.updated_at) : (d.created_at ? new Date(d.created_at) : null);
-              return dataAtualizacao && dataAtualizacao > dataUltimaAnalise;
+              // Usar updated_at se disponível, senão created_at
+              const dataStr = d.updated_at || d.created_at;
+              if (!dataStr) {
+                console.log(`[EMPRESA] Dado ${d.competencia} sem data de criação/atualização`);
+                return false;
+              }
+              const dataAtualizacao = new Date(dataStr);
+              const isNovo = dataAtualizacao > dataUltimaAnalise;
+              if (isNovo) {
+                console.log(`[EMPRESA] ✓ Dado ${d.competencia} é mais recente:`, dataStr);
+              }
+              return isNovo;
             });
-            setTemNovosDados(temDadosNovos);
+            
+            // Também verificar se há mais registros do que na última análise
+            // (caso os timestamps não estejam disponíveis)
+            const qtdMesesAnalise = analisesList[0].meses_analisados || 0;
+            const temMaisRegistros = dadosList.length > qtdMesesAnalise;
+            
+            const deveHabilitar = temDadosNovos || temMaisRegistros;
+            console.log(`[EMPRESA] Tem dados novos: ${temDadosNovos}, tem mais registros: ${temMaisRegistros} (${dadosList.length} vs ${qtdMesesAnalise})`);
+            
+            setTemNovosDados(deveHabilitar);
           } else {
-            // Nunca fez análise, pode analisar
-            setTemNovosDados(true);
+            // Nunca fez análise, pode analisar se tem dados
+            console.log('[EMPRESA] Nenhuma análise anterior, habilitando botão');
+            setTemNovosDados(dadosList.length > 0);
           }
         }
       } else if (anaRes.ok) {
@@ -403,11 +559,11 @@ function EmpresaDetailPage({ empresaId, onNavigate }) {
               <Button 
                 onClick={executarAnalise} 
                 loading={analisando} 
-                disabled={registros.length < 3 || (!temNovossDados && ultimaAnalise)}
+                disabled={registros.length < 3 || (!temNovosDados && ultimaAnalise)}
               >
                 <BarChart3 className="w-4 h-4" /> Analisar
               </Button>
-              {!temNovossDados && ultimaAnalise && registros.length >= 3 && (
+              {!temNovosDados && ultimaAnalise && registros.length >= 3 && (
                 <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-2 bg-slate-800 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10">
                   Importe novos dados para analisar novamente
                   <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-800"></div>
@@ -971,289 +1127,290 @@ function HistoricoTab({ analises }) {
 // MODALS
 // ============================================================================
 
-function UploadModal({ isOpen, onClose, empresaId, onSuccess, registrosExistentes = [] }) {
-  const { api } = useAuth();
+function UploadModal({ isOpen, onClose, empresaId, onSuccess }) {
   const toast = useToast();
-  const [step, setStep] = useState(1); // 1=upload, 2=mapping, 3=conflitos
+  const [step, setStep] = useState(1); // 1=upload, 2=processando, 3=preview, 4=conflito, 5=erro
   const [file, setFile] = useState(null);
-  const [csvContent, setCsvContent] = useState('');
-  const [preview, setPreview] = useState(null);
-  const [mapping, setMapping] = useState({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [conflitos, setConflitos] = useState([]);
-  const [modoConflito, setModoConflito] = useState('substituir'); // 'substituir' ou 'ignorar'
+  const [resultadoIA, setResultadoIA] = useState(null);
 
-  // Função para extrair data do valor
-  const parseDataCompetencia = (valor) => {
-    if (!valor) return null;
-    const str = String(valor).trim();
-    
-    // Formato: MM/YYYY ou MM-YYYY
-    let match = str.match(/^(\d{1,2})[\/\-](\d{4})$/);
-    if (match) return { mes: parseInt(match[1]), ano: parseInt(match[2]) };
-    
-    // Formato: YYYY-MM ou YYYY/MM
-    match = str.match(/^(\d{4})[\/\-](\d{1,2})$/);
-    if (match) return { mes: parseInt(match[2]), ano: parseInt(match[1]) };
-    
-    // Formato: DD/MM/YYYY
-    match = str.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
-    if (match) return { mes: parseInt(match[2]), ano: parseInt(match[3]) };
-    
-    // Formato: YYYY-MM-DD
-    match = str.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/);
-    if (match) return { mes: parseInt(match[2]), ano: parseInt(match[1]) };
-    
-    return null;
-  };
-
+  // Handler de seleção de arquivo - SEMPRE usa IA
   const handleFileChange = async (e) => {
     const f = e.target.files[0];
     if (!f) return;
     setFile(f);
     setError('');
-    const text = await f.text();
-    setCsvContent(text);
-    
-    Papa.parse(text, {
-      header: true,
-      preview: 5,
-      complete: (results) => {
-        setPreview({ columns: results.meta.fields || [], rows: results.data });
-        const autoMap = {};
-        (results.meta.fields || []).forEach(col => {
-          const lower = col.toLowerCase();
-          // Data/Período
-          if (lower.includes('compet') || lower.includes('data') || lower.includes('period') || lower.includes('date') || lower.includes('mes') || lower.includes('mês')) autoMap.data = col;
-          // Receita
-          if (lower.includes('fatur') || lower.includes('receit') || lower.includes('venda') || lower.includes('revenue') || lower.includes('sales')) autoMap.receita = col;
-          // Custos
-          if (lower.includes('custo') || lower.includes('cmv') || lower.includes('cpv') || lower.includes('cogs') || lower.includes('cost')) autoMap.custos = col;
-          // Despesas
-          if (lower.includes('desp') || lower.includes('gasto') || lower.includes('expense') || lower.includes('admin')) autoMap.despesas = col;
-          // Impostos
-          if (lower.includes('impost') || lower.includes('tribut') || lower.includes('tax')) autoMap.impostos = col;
-          // Folha
-          if (lower.includes('folha') || lower.includes('salar') || lower.includes('pessoal') || lower.includes('payroll') || lower.includes('wage')) autoMap.folha = col;
-          // Caixa
-          if (lower.includes('caixa') || lower.includes('banco') || lower.includes('saldo') || lower.includes('cash') || lower.includes('dispon')) autoMap.caixa = col;
-        });
-        setMapping(autoMap);
-        setStep(2);
-      },
-      error: () => setError('Erro ao processar arquivo')
-    });
+    await processarComIA(f);
   };
 
-  // Verifica conflitos de períodos antes de importar
-  const verificarConflitos = () => {
-    if (!preview || !mapping.data) return;
-    
-    // Parse completo do CSV para verificar todos os períodos
-    Papa.parse(csvContent, {
-      header: true,
-      complete: (results) => {
-        const periodosExistentes = new Set(
-          registrosExistentes.map(r => `${r.ano}-${String(r.mes).padStart(2, '0')}`)
-        );
-        
-        const conflitosEncontrados = [];
-        results.data.forEach((row, idx) => {
-          const dataValor = row[mapping.data];
-          const parsed = parseDataCompetencia(dataValor);
-          if (parsed) {
-            const chave = `${parsed.ano}-${String(parsed.mes).padStart(2, '0')}`;
-            if (periodosExistentes.has(chave)) {
-              conflitosEncontrados.push({
-                linha: idx + 2, // +2 porque header é linha 1
-                periodo: `${String(parsed.mes).padStart(2, '0')}/${parsed.ano}`,
-                ano: parsed.ano,
-                mes: parsed.mes
-              });
-            }
-          }
-        });
-        
-        if (conflitosEncontrados.length > 0) {
-          setConflitos(conflitosEncontrados);
-          setStep(3); // Vai para tela de conflitos
-        } else {
-          // Sem conflitos, importar direto
-          executarImportacao('ignorar');
-        }
-      }
-    });
-  };
-
-  const executarImportacao = async (modo) => {
+  // Processar com IA
+  const processarComIA = async (arquivo) => {
+    setStep(2);
     setLoading(true);
-    setError('');
+    
     try {
-      const res = await api(`/empresas/${empresaId}/dados/upload/confirmar`, {
+      const formData = new FormData();
+      formData.append('file', arquivo);
+      
+      const res = await fetch(`/api/empresas/${empresaId}/importar/ia/preview`, {
         method: 'POST',
-        body: JSON.stringify({ 
-          csv_content: csvContent, 
-          mapping, 
-          substituir_existentes: modo === 'substituir'
-        })
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` },
+        body: formData
       });
-      if (!res.ok) throw new Error((await res.json()).detail || 'Erro ao importar');
+      
       const result = await res.json();
       
-      let mensagem = `${result.registros_criados} registros importados`;
-      if (result.registros_atualizados > 0) {
-        mensagem += `, ${result.registros_atualizados} atualizados`;
+      if (!res.ok) {
+        throw new Error(result.detail || 'Erro ao processar arquivo');
       }
-      if (result.registros_ignorados > 0) {
-        mensagem += `, ${result.registros_ignorados} ignorados`;
+      
+      if (result.sucesso) {
+        setResultadoIA(result);
+        setStep(result.periodo_existe ? 4 : 3);
+      } else {
+        setError(result.erro || 'Não foi possível extrair dados do arquivo');
+        setStep(5);
       }
-      toast.success(mensagem + '!');
-      onSuccess();
-      onClose();
     } catch (err) {
-      setError(err.message);
+      setError(err.message || 'Erro ao processar arquivo com IA');
+      setStep(5);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleConfirm = async () => {
-    verificarConflitos();
+  // Confirmar importação
+  const confirmarImportacao = async (substituir = false) => {
+    setLoading(true);
+    
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('substituir_existentes', substituir ? 'true' : 'false');
+      
+      const res = await fetch(`/api/empresas/${empresaId}/importar/ia`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` },
+        body: formData
+      });
+      
+      const result = await res.json();
+      
+      if (result.sucesso) {
+        toast.success(result.mensagem || 'Dados importados com sucesso!');
+        onSuccess();
+        onClose();
+      } else if (result.requer_acao === 'confirmar_substituicao') {
+        setResultadoIA(result);
+        setStep(4);
+      } else {
+        throw new Error(result.erro || 'Erro na importação');
+      }
+    } catch (err) {
+      setError(err.message);
+      setStep(5);
+    } finally {
+      setLoading(false);
+    }
   };
 
+  // Formatar valor monetário
+  const formatarValor = (valor) => {
+    if (!valor || valor === 0) return '-';
+    return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(valor);
+  };
+
+  // Reset ao fechar
   useEffect(() => {
     if (!isOpen) { 
       setStep(1); 
       setFile(null); 
-      setCsvContent(''); 
-      setPreview(null); 
-      setMapping({}); 
       setError(''); 
-      setConflitos([]);
-      setModoConflito('substituir');
+      setResultadoIA(null);
     }
   }, [isOpen]);
 
-  const campos = [
-    { key: 'data', label: 'Data/Competência', required: true },
-    { key: 'receita', label: 'Receita', required: true },
-    { key: 'custos', label: 'Custos' }, { key: 'despesas', label: 'Despesas' },
-    { key: 'impostos', label: 'Impostos' }, { key: 'folha', label: 'Folha' }, { key: 'caixa', label: 'Caixa' },
-  ];
-
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Importar Dados" size="lg">
-      {error && <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700">{error}</div>}
       
       {/* Step 1: Upload */}
       {step === 1 && (
         <div className="text-center py-8">
-          <input type="file" accept=".csv,.xlsx,.xls" onChange={handleFileChange} className="hidden" id="file-upload" />
+          <input type="file" accept=".pdf" onChange={handleFileChange} className="hidden" id="file-upload" />
           <label htmlFor="file-upload" className="cursor-pointer">
-            <div className="w-20 h-20 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4"><Upload className="w-10 h-10 text-blue-600" /></div>
+            <div className="w-20 h-20 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <Upload className="w-10 h-10 text-blue-600" />
+            </div>
             <p className="text-lg font-medium text-slate-900 mb-1">Selecione um arquivo</p>
-            <p className="text-sm text-slate-500">CSV ou Excel</p>
+            <p className="text-sm text-slate-500">PDF, Excel, CSV ou Imagem</p>
           </label>
+          <div className="mt-6 p-4 bg-gradient-to-r from-blue-50 to-purple-50 rounded-lg text-left border border-blue-100">
+            <p className="text-sm font-medium text-blue-800 mb-2">🤖 Importação Inteligente com IA</p>
+            <p className="text-xs text-blue-600">
+              Funciona com <strong>qualquer sistema contábil</strong>: Domínio, Contmatic, Alterdata, Prosoft, Fortes, e outros.
+              A IA analisa e extrai os dados automaticamente.
+            </p>
+          </div>
         </div>
       )}
       
-      {/* Step 2: Mapeamento */}
-      {step === 2 && preview && (
+      {/* Step 2: Processando com IA */}
+      {step === 2 && (
+        <div className="text-center py-12">
+          <div className="relative">
+            <Loader2 className="w-16 h-16 text-blue-600 animate-spin mx-auto" />
+            <div className="absolute inset-0 flex items-center justify-center">
+              <span className="text-2xl">🤖</span>
+            </div>
+          </div>
+          <p className="text-lg font-medium text-slate-900 mt-6">Analisando com IA...</p>
+          <p className="text-sm text-slate-500 mt-2">Extraindo dados do documento</p>
+          <p className="text-xs text-slate-400 mt-4">Isso pode levar alguns segundos</p>
+        </div>
+      )}
+      
+      {/* Step 3: Preview dos dados */}
+      {step === 3 && resultadoIA && (
         <div>
-          <p className="text-sm text-slate-600 mb-4">Arquivo: <strong>{file?.name}</strong></p>
-          <h4 className="font-medium text-slate-900 mb-3">Mapeie as colunas:</h4>
-          <div className="grid grid-cols-2 gap-3 mb-4">
-            {campos.map(campo => (
-              <div key={campo.key}>
-                <label className="block text-sm font-medium text-slate-700 mb-1">{campo.label} {campo.required && <span className="text-red-500">*</span>}</label>
-                <select value={mapping[campo.key] || ''} onChange={e => setMapping({...mapping, [campo.key]: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm">
-                  <option value="">Selecione...</option>
-                  {preview.columns.map(col => <option key={col} value={col}>{col}</option>)}
-                </select>
+          <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded-lg">
+            <div className="flex items-start gap-3">
+              <CheckCircle className="w-6 h-6 text-green-600 mt-0.5" />
+              <div>
+                <h4 className="font-medium text-green-800">Dados extraídos com sucesso!</h4>
+                <p className="text-sm text-green-700 mt-1">
+                  Confiança: <strong className="capitalize">{resultadoIA.confianca}</strong>
+                  {resultadoIA.sistema_detectado && resultadoIA.sistema_detectado !== 'desconhecido' && (
+                    <> • Sistema: <strong>{resultadoIA.sistema_detectado}</strong></>
+                  )}
+                  {resultadoIA.metodo_usado && (
+                    <> • Método: <strong className="capitalize">{resultadoIA.metodo_usado === 'parser_local' ? '📦 Parser Local (grátis)' : '🤖 IA Claude'}</strong></>
+                  )}
+                </p>
               </div>
-            ))}
+            </div>
           </div>
-          <div className="flex justify-end gap-2 mt-6">
-            <Button variant="secondary" onClick={() => setStep(1)}>Voltar</Button>
-            <Button onClick={handleConfirm} loading={loading} disabled={!mapping.data || !mapping.receita}>Importar</Button>
+          
+          <div className="mb-4 p-4 bg-slate-50 rounded-lg">
+            <div className="grid grid-cols-2 gap-4 text-sm mb-4">
+              {resultadoIA.empresa_arquivo && (
+                <div><span className="text-slate-500">Empresa:</span> <strong>{resultadoIA.empresa_arquivo}</strong></div>
+              )}
+              {resultadoIA.cnpj_arquivo && (
+                <div><span className="text-slate-500">CNPJ:</span> <strong>{resultadoIA.cnpj_arquivo}</strong></div>
+              )}
+              {resultadoIA.periodo && (
+                <div><span className="text-slate-500">Período:</span> <strong>{resultadoIA.periodo}</strong></div>
+              )}
+              <div><span className="text-slate-500">Campos extraídos:</span> <strong>{resultadoIA.campos_extraidos?.length || 0}</strong></div>
+            </div>
+            
+            <h4 className="font-medium text-slate-900 mb-2">Valores encontrados:</h4>
+            <div className="grid grid-cols-2 gap-2 text-sm max-h-48 overflow-y-auto">
+              {Object.entries(resultadoIA.dados || {})
+                .filter(([k, v]) => v && v > 0 && !['ano', 'mes'].includes(k))
+                .map(([campo, valor]) => (
+                  <div key={campo} className="flex justify-between py-1 border-b border-slate-100">
+                    <span className="text-slate-600 capitalize">{campo.replace(/_/g, ' ')}:</span>
+                    <span className="font-medium">{formatarValor(valor)}</span>
+                  </div>
+                ))}
+            </div>
+          </div>
+          
+          {resultadoIA.observacoes?.length > 0 && (
+            <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+              <p className="text-sm font-medium text-amber-800 mb-1">Observações:</p>
+              <ul className="text-xs text-amber-700">
+                {resultadoIA.observacoes.map((obs, i) => <li key={i}>• {obs}</li>)}
+              </ul>
+            </div>
+          )}
+          
+          <div className="text-xs text-slate-400 mb-4 flex justify-between">
+            <span>Custo: ~R$ {resultadoIA.custo_estimado?.toFixed(4) || '0.00'}</span>
+            <span>Tokens: {resultadoIA.tokens_usados || 0}</span>
+          </div>
+          
+          <div className="flex justify-between">
+            <Button variant="secondary" onClick={() => { setStep(1); setFile(null); setResultadoIA(null); }}>
+              Cancelar
+            </Button>
+            <Button onClick={() => confirmarImportacao(false)} loading={loading}>
+              Confirmar e Importar
+            </Button>
           </div>
         </div>
       )}
       
-      {/* Step 3: Conflitos detectados */}
-      {step === 3 && conflitos.length > 0 && (
+      {/* Step 4: Conflito de período */}
+      {step === 4 && resultadoIA && (
         <div>
           <div className="mb-4 p-4 bg-amber-50 border border-amber-200 rounded-lg">
             <div className="flex items-start gap-3">
               <AlertTriangle className="w-5 h-5 text-amber-600 mt-0.5" />
               <div>
-                <h4 className="font-medium text-amber-800">Conflito de períodos detectado</h4>
+                <h4 className="font-medium text-amber-800">Período já existe</h4>
                 <p className="text-sm text-amber-700 mt-1">
-                  {conflitos.length} período(s) já possui(em) dados cadastrados:
+                  Já existem dados para <strong>{resultadoIA.periodo || `${resultadoIA.mes}/${resultadoIA.ano}`}</strong>
                 </p>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {conflitos.slice(0, 6).map((c, i) => (
-                    <span key={i} className="px-2 py-1 bg-amber-100 text-amber-800 text-xs rounded">
-                      {c.periodo}
-                    </span>
-                  ))}
-                  {conflitos.length > 6 && (
-                    <span className="px-2 py-1 bg-amber-100 text-amber-800 text-xs rounded">
-                      +{conflitos.length - 6} mais
-                    </span>
-                  )}
-                </div>
               </div>
             </div>
           </div>
           
-          <h4 className="font-medium text-slate-900 mb-3">O que deseja fazer?</h4>
+          <div className="mb-4 p-4 bg-slate-50 rounded-lg">
+            <h4 className="font-medium text-slate-900 mb-2">Dados do arquivo:</h4>
+            <div className="grid grid-cols-2 gap-2 text-sm">
+              {resultadoIA.empresa_arquivo && <p><span className="text-slate-500">Empresa:</span> {resultadoIA.empresa_arquivo}</p>}
+              <p><span className="text-slate-500">Campos:</span> {resultadoIA.campos_extraidos?.length || 0}</p>
+              <p><span className="text-slate-500">Confiança:</span> <span className="capitalize">{resultadoIA.confianca}</span></p>
+            </div>
+          </div>
           
-          <div className="space-y-3 mb-6">
-            <label className={`flex items-start gap-3 p-4 border rounded-lg cursor-pointer transition-colors ${modoConflito === 'substituir' ? 'border-blue-500 bg-blue-50' : 'border-slate-200 hover:border-slate-300'}`}>
-              <input 
-                type="radio" 
-                name="modoConflito" 
-                value="substituir" 
-                checked={modoConflito === 'substituir'}
-                onChange={(e) => setModoConflito(e.target.value)}
-                className="mt-1"
-              />
+          <p className="text-sm text-slate-700 mb-4">Deseja substituir os dados existentes pelos novos dados?</p>
+          
+          <div className="flex justify-between">
+            <Button variant="secondary" onClick={onClose}>Cancelar</Button>
+            <Button onClick={() => confirmarImportacao(true)} loading={loading}>
+              Substituir dados
+            </Button>
+          </div>
+        </div>
+      )}
+      
+      {/* Step 5: Erro */}
+      {step === 5 && (
+        <div>
+          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="w-6 h-6 text-red-600 mt-0.5" />
               <div>
-                <p className="font-medium text-slate-900">Substituir dados existentes</p>
-                <p className="text-sm text-slate-500">Os novos dados vão sobrescrever os dados atuais nos períodos em conflito</p>
+                <h4 className="font-medium text-red-800 text-lg">Erro na importação</h4>
+                <p className="text-sm text-red-700 mt-2">{error}</p>
               </div>
-            </label>
-            
-            <label className={`flex items-start gap-3 p-4 border rounded-lg cursor-pointer transition-colors ${modoConflito === 'ignorar' ? 'border-blue-500 bg-blue-50' : 'border-slate-200 hover:border-slate-300'}`}>
-              <input 
-                type="radio" 
-                name="modoConflito" 
-                value="ignorar"
-                checked={modoConflito === 'ignorar'}
-                onChange={(e) => setModoConflito(e.target.value)}
-                className="mt-1"
-              />
-              <div>
-                <p className="font-medium text-slate-900">Manter dados atuais</p>
-                <p className="text-sm text-slate-500">Os períodos em conflito serão ignorados, mantendo os dados já cadastrados</p>
-              </div>
-            </label>
+            </div>
+          </div>
+          
+          <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg mb-6">
+            <h4 className="font-medium text-blue-800 mb-2">O que fazer:</h4>
+            <ul className="text-sm text-blue-700 space-y-1">
+              <li>• Verifique se o arquivo não está corrompido ou protegido</li>
+              <li>• Tente um arquivo com melhor qualidade (menos escaneado)</li>
+              <li>• Certifique-se que é um documento contábil válido</li>
+            </ul>
           </div>
           
           <div className="flex justify-end gap-2">
-            <Button variant="secondary" onClick={() => setStep(2)}>Voltar</Button>
-            <Button onClick={() => executarImportacao(modoConflito)} loading={loading}>
-              {modoConflito === 'substituir' ? 'Substituir e Importar' : 'Importar Novos Apenas'}
+            <Button variant="secondary" onClick={() => { setStep(1); setFile(null); setError(''); }}>
+              Tentar outro arquivo
             </Button>
+            <Button onClick={onClose}>Fechar</Button>
           </div>
         </div>
       )}
     </Modal>
   );
 }
-
 function RegistroModal({ isOpen, onClose, empresaId, onSuccess }) {
   const { api } = useAuth();
   const toast = useToast();
@@ -1491,7 +1648,7 @@ function ImportacaoPage({ onNavigate }) {
   const toast = useToast();
   
   // Estados do fluxo
-  const [etapa, setEtapa] = useState('upload'); // upload, processando, preview, sucesso
+  const [etapa, setEtapa] = useState('upload'); // upload, detectando, processando, preview, revisao, sucesso
   const [loading, setLoading] = useState(false);
   const [erro, setErro] = useState('');
   
@@ -1504,8 +1661,106 @@ function ImportacaoPage({ onNavigate }) {
   const [dadosConsolidados, setDadosConsolidados] = useState(null);
   const [empresaExistente, setEmpresaExistente] = useState(null);
   
+  // === NOVO: Estados para revisão individual ===
+  const [arquivoSelecionado, setArquivoSelecionado] = useState(null);
+  const [dadosRevisao, setDadosRevisao] = useState(null);
+  const [carregandoRevisao, setCarregandoRevisao] = useState(false);
+  
+  // Modal de CNPJ faltando
+  const [showModalCnpj, setShowModalCnpj] = useState(false);
+  const [cnpjManual, setCnpjManual] = useState('');
+  const [erroCnpj, setErroCnpj] = useState('');
+  
   // Drag and drop
   const [dragAtivo, setDragAtivo] = useState(false);
+
+  // Sistema contábil - Detecção automática
+  const [sistemasContabeis, setSistemasContabeis] = useState([]);
+  const [sistemaContabilSelecionado, setSistemaContabilSelecionado] = useState(null);
+  const [loadingSistemas, setLoadingSistemas] = useState(true);
+  
+  // Modal de detecção
+  const [showModalDeteccao, setShowModalDeteccao] = useState(false);
+  const [sistemaDetectado, setSistemaDetectado] = useState(null);
+  const [confiancaDeteccao, setConfiancaDeteccao] = useState(0);
+  const [lembrarEscolha, setLembrarEscolha] = useState(false);
+  const [showListaSistemas, setShowListaSistemas] = useState(false);
+  const [buscaSistema, setBuscaSistema] = useState('');
+  const [detectando, setDetectando] = useState(false);
+
+  // Chave para localStorage baseada no contador logado
+  const getStorageKey = () => {
+    const token = localStorage.getItem('token');
+    if (token) {
+      try {
+        const payload = JSON.parse(atob(token.split('.')[1]));
+        return `sistema_contabil_preferido_${payload.contador_id || 'default'}`;
+      } catch { return 'sistema_contabil_preferido_default'; }
+    }
+    return 'sistema_contabil_preferido_default';
+  };
+
+  // Carregar sistemas contábeis
+  useEffect(() => {
+    loadSistemasContabeis();
+  }, []);
+
+  const loadSistemasContabeis = async () => {
+    try {
+      const res = await api('/api/sistemas-contabeis');
+      if (res.ok) {
+        const data = await res.json();
+        setSistemasContabeis(data.sistemas || []);
+      }
+    } catch (err) {
+      console.error('Erro ao carregar sistemas:', err);
+      setSistemasContabeis([
+        { id: 0, nome: 'Outro / Não sei', fabricante: '', tem_parser: false, label: 'Outro / Não sei' },
+        { id: 1, nome: 'Domínio Sistemas', fabricante: 'Thomson Reuters', tem_parser: true, label: 'Domínio Sistemas (Thomson Reuters)' },
+      ]);
+    } finally {
+      setLoadingSistemas(false);
+    }
+  };
+
+  // Verificar se há preferência salva
+  const getSistemaPreferido = () => {
+    try {
+      const saved = localStorage.getItem(getStorageKey());
+      if (saved) {
+        return JSON.parse(saved);
+      }
+    } catch {}
+    return null;
+  };
+
+  // Salvar preferência
+  const salvarPreferencia = (sistemaId) => {
+    try {
+      localStorage.setItem(getStorageKey(), JSON.stringify({
+        sistemaId,
+        timestamp: Date.now()
+      }));
+    } catch {}
+  };
+
+  // Limpar preferência
+  const limparPreferencia = () => {
+    try {
+      localStorage.removeItem(getStorageKey());
+    } catch {}
+  };
+
+  // Filtrar sistemas
+  const sistemasFiltrados = buscaSistema
+    ? sistemasContabeis.filter(s => 
+        s.nome.toLowerCase().includes(buscaSistema.toLowerCase()) ||
+        (s.fabricante && s.fabricante.toLowerCase().includes(buscaSistema.toLowerCase()))
+      )
+    : sistemasContabeis;
+
+  // Sistema selecionado
+  const sistemaSelecionado = sistemasContabeis.find(s => s.id === sistemaContabilSelecionado);
 
   const handleDragOver = (e) => {
     e.preventDefault();
@@ -1528,17 +1783,109 @@ function ImportacaoPage({ onNavigate }) {
     adicionarArquivos(files);
   };
 
-  const adicionarArquivos = (files) => {
+  const adicionarArquivos = async (files) => {
     const validFiles = files.filter(f => {
       const ext = f.name.split('.').pop().toLowerCase();
-      return ['pdf', 'xls', 'xlsx'].includes(ext);
+      return ['pdf'].includes(ext);
     });
     
     if (validFiles.length < files.length) {
       toast.warning('Alguns arquivos foram ignorados (formato inválido)');
     }
+
+    if (validFiles.length === 0) return;
     
     setArquivos(prev => [...prev, ...validFiles]);
+    
+    // Verificar se já tem preferência salva
+    const preferencia = getSistemaPreferido();
+    if (preferencia && preferencia.sistemaId !== undefined) {
+      // Usar sistema preferido automaticamente
+      setSistemaContabilSelecionado(preferencia.sistemaId);
+      const sistema = sistemasContabeis.find(s => s.id === preferencia.sistemaId);
+      if (sistema) {
+        toast.success(`Usando sistema: ${sistema.nome}. Clique em "Alterar" para trocar.`, { duration: 4000 });
+      }
+      return;
+    }
+    
+    // Detectar sistema automaticamente (usa o primeiro arquivo)
+    if (validFiles.length > 0 && !sistemaContabilSelecionado) {
+      await detectarSistema(validFiles[0]);
+    }
+  };
+
+  const detectarSistema = async (arquivo) => {
+    setDetectando(true);
+    
+    try {
+      const formData = new FormData();
+      formData.append('arquivo', arquivo);
+      
+      const res = await fetch('/api/detectar-sistema', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: formData
+      });
+      
+      if (res.ok) {
+        const data = await res.json();
+        
+        console.log('[DETECTOR] Resultado:', data);
+        console.log('[DETECTOR] Confiança:', data.confianca, '%');
+        console.log('[DETECTOR] Indicadores:', data.indicadores);
+        
+        // Aumentado de 40% para 60% - só aceita se tiver indicadores fortes
+        if (data.detectado && data.confianca >= 60) {
+          // Sistema detectado com confiança suficiente
+          setSistemaDetectado(data.sistema);
+          setConfiancaDeteccao(data.confianca);
+          setShowModalDeteccao(true);
+        } else {
+          // Não conseguiu detectar com confiança, mostra lista para seleção manual
+          console.log('[DETECTOR] Confiança insuficiente, mostrando lista de sistemas');
+          setSistemaDetectado(null);
+          setShowListaSistemas(true);
+          setShowModalDeteccao(true);
+        }
+      } else {
+        // Erro na detecção, permite seleção manual
+        setShowListaSistemas(true);
+        setShowModalDeteccao(true);
+      }
+    } catch (err) {
+      console.error('Erro ao detectar sistema:', err);
+      setShowListaSistemas(true);
+      setShowModalDeteccao(true);
+    } finally {
+      setDetectando(false);
+    }
+  };
+
+  const confirmarSistemaDetectado = () => {
+    if (sistemaDetectado) {
+      setSistemaContabilSelecionado(sistemaDetectado.codigo);
+      if (lembrarEscolha) {
+        salvarPreferencia(sistemaDetectado.codigo);
+        toast.success('Preferência salva! Não perguntaremos novamente.');
+      }
+    }
+    setShowModalDeteccao(false);
+    setShowListaSistemas(false);
+  };
+
+  const selecionarOutroSistema = (sistema) => {
+    console.log('[SISTEMA] Selecionando sistema:', sistema);
+    console.log('[SISTEMA] ID:', sistema.id);
+    setSistemaContabilSelecionado(sistema.id);
+    if (lembrarEscolha) {
+      salvarPreferencia(sistema.id);
+      toast.success('Preferência salva! Não perguntaremos novamente.');
+    }
+    setShowModalDeteccao(false);
+    setShowListaSistemas(false);
   };
 
   const removerArquivo = (index) => {
@@ -1551,6 +1898,11 @@ function ImportacaoPage({ onNavigate }) {
       return;
     }
 
+    if (sistemaContabilSelecionado === null) {
+      setErro('Selecione o sistema contábil primeiro');
+      return;
+    }
+
     setEtapa('processando');
     setLoading(true);
     setErro('');
@@ -1560,6 +1912,16 @@ function ImportacaoPage({ onNavigate }) {
     const resultados = [];
     let empresaInfo = null;
     let cnpjEncontrado = null;
+    
+    // Verificar se sistema tem parser local
+    const usarParserLocal = sistemaSelecionado?.tem_parser;
+    
+    console.log('[IMPORT] ========== DEBUG ==========');
+    console.log('[IMPORT] sistemaContabilSelecionado:', sistemaContabilSelecionado);
+    console.log('[IMPORT] sistemaSelecionado:', sistemaSelecionado);
+    console.log('[IMPORT] usarParserLocal:', usarParserLocal);
+    console.log('[IMPORT] Condição Domínio:', usarParserLocal && sistemaContabilSelecionado === 1);
+    console.log('[IMPORT] ==============================');
 
     for (let i = 0; i < arquivos.length; i++) {
       const file = arquivos[i];
@@ -1569,8 +1931,37 @@ function ImportacaoPage({ onNavigate }) {
         const formData = new FormData();
         formData.append('file', file);
 
-        const res = await api('/importar/balancete', {
+        // Escolher endpoint baseado no sistema
+        let endpoint = '/api/importacao/ia/preview-lote';
+        
+        // Só usa parser Domínio se:
+        // 1. Sistema tem parser local (tem_parser = true)
+        // 2. Sistema selecionado é EXATAMENTE o Domínio (id = 1)
+        // 3. Sistema selecionado NÃO é "Outro / Não sei" (id = 0)
+        const ehDominio = sistemaContabilSelecionado === 1;
+        const ehOutro = sistemaContabilSelecionado === 0;
+        
+        console.log('[IMPORT] Verificando endpoint:');
+        console.log('[IMPORT]   - sistemaContabilSelecionado:', sistemaContabilSelecionado);
+        console.log('[IMPORT]   - ehDominio:', ehDominio);
+        console.log('[IMPORT]   - ehOutro:', ehOutro);
+        console.log('[IMPORT]   - usarParserLocal:', usarParserLocal);
+        
+        if (usarParserLocal && ehDominio && !ehOutro) {
+          // Sistema Domínio confirmado
+          endpoint = '/api/importacao/dominio/preview';
+          console.log('[IMPORT] >>> Usando PARSER DOMÍNIO');
+        } else {
+          console.log('[IMPORT] >>> Usando IA');
+        }
+        
+        console.log(`[IMPORT] Endpoint final: ${endpoint} para ${file.name}`);
+        
+        const res = await fetch(endpoint, {
           method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('token')}`
+          },
           body: formData
         });
 
@@ -1579,6 +1970,7 @@ function ImportacaoPage({ onNavigate }) {
         if (dados.sucesso) {
           const balancete = dados.balancete || dados;
           const empresa = balancete?.empresa || dados.empresa;
+          const dadosExtraidos = balancete?.dados || dados.dados || {};
           
           // Capturar info da empresa
           if (!empresaInfo && empresa) {
@@ -1586,11 +1978,23 @@ function ImportacaoPage({ onNavigate }) {
             cnpjEncontrado = empresa.cnpj;
           }
 
+          // Extrai competência do período
+          let competencia = 'N/A';
+          if (balancete?.periodo?.fim) {
+            competencia = balancete.periodo.fim.substring(0, 7);
+          } else if (dadosExtraidos.ano && dadosExtraidos.mes) {
+            competencia = `${dadosExtraidos.ano}-${String(dadosExtraidos.mes).padStart(2, '0')}`;
+          }
+
+          console.log('[PREVIEW] Arquivo:', file.name);
+          console.log('[PREVIEW] Dados extraídos:', dadosExtraidos);
+          console.log('[PREVIEW] Competência:', competencia);
+
           resultados.push({
             nome: file.name,
             sucesso: true,
-            competencia: balancete?.periodo?.fim?.substring(0, 7) || 'N/A',
-            dados: balancete
+            competencia: competencia,
+            dados: balancete  // Guarda o balancete completo incluindo dados
           });
         } else {
           resultados.push({
@@ -1614,22 +2018,82 @@ function ImportacaoPage({ onNavigate }) {
     // Verificar se empresa existe
     if (cnpjEncontrado) {
       try {
-        const resEmp = await api(`/empresas/cnpj/${cnpjEncontrado}`);
-        if (resEmp.ok) {
-          setEmpresaExistente(await resEmp.json());
+        // Limpar CNPJ (remover formatação) para evitar problemas na URL
+        const cnpjLimpo = cnpjEncontrado.replace(/[^\d]/g, '');
+        console.log('[IMPORT] Verificando empresa existente - CNPJ:', cnpjEncontrado, '-> limpo:', cnpjLimpo);
+        
+        // Usar endpoint alternativo que não conflita com /empresas/{id}
+        const resEmp = await api(`/api/buscar-empresa/${cnpjLimpo}`);
+        const resultado = await resEmp.json();
+        
+        console.log('[IMPORT] Resposta da busca:', resultado);
+        
+        if (resultado.encontrada && resultado.empresa) {
+          console.log('[IMPORT] ✓ Empresa encontrada:', resultado.empresa.razao_social);
+          setEmpresaExistente(resultado.empresa);
+        } else {
+          console.log('[IMPORT] ✗ Empresa não encontrada, será criada nova');
+          setEmpresaExistente(null);
         }
-      } catch {}
+      } catch (err) {
+        console.log('[IMPORT] Erro ao buscar empresa:', err);
+        setEmpresaExistente(null);
+      }
+    } else {
+      console.log('[IMPORT] CNPJ não encontrado nos arquivos');
+      setEmpresaExistente(null);
     }
 
     // Consolidar dados
     const sucessos = resultados.filter(r => r.sucesso);
     if (sucessos.length > 0) {
+      // Dados vêm de r.dados.dados (estrutura do endpoint preview-lote)
+      const getTotalReceita = (r) => {
+        const d = r.dados?.dados || r.dados?.totais || {};
+        return d.receita_bruta || d.receita_servicos || d.receita || 0;
+      };
+      const getTotalLucro = (r) => {
+        const d = r.dados?.dados || r.dados?.totais || {};
+        return d.lucro_liquido || 0;
+      };
+
+      // IMPORTANTE: Balancetes brasileiros têm DRE ACUMULADA no exercício
+      // Não devemos SOMAR os meses - o último mês já contém o total!
+      // 
+      // Exemplo:
+      // - Janeiro: Receita = 50.000 (só janeiro)
+      // - Fevereiro: Receita = 120.000 (jan + fev)
+      // - Março: Receita = 190.000 (jan + fev + mar)
+      // 
+      // ERRADO: 50.000 + 120.000 + 190.000 = 360.000
+      // CERTO: usar 190.000 (valor do último mês = total acumulado)
+
+      // Ordena por competência para pegar o último
+      const ordenados = [...sucessos].sort((a, b) => {
+        const compA = a.competencia || '0000-00';
+        const compB = b.competencia || '0000-00';
+        return compA.localeCompare(compB);
+      });
+      
+      const ultimo = ordenados[ordenados.length - 1];
+      const ultimaReceita = getTotalReceita(ultimo);
+      const ultimoLucro = getTotalLucro(ultimo);
+      
+      console.log('[CONSOLIDAÇÃO] Usando valores do ÚLTIMO mês (acumulado)');
+      console.log('[CONSOLIDAÇÃO] Último período:', ultimo.competencia);
+      console.log('[CONSOLIDAÇÃO] Receita acumulada:', ultimaReceita);
+      console.log('[CONSOLIDAÇÃO] Lucro acumulado:', ultimoLucro);
+      
+      // Se tiver só 1 mês, usa ele diretamente
+      // Se tiver múltiplos meses, usa o último (que é o acumulado do exercício)
       setDadosConsolidados({
         empresa: empresaInfo,
         arquivos: sucessos,
-        totalReceita: sucessos.reduce((sum, r) => sum + (r.dados?.totais?.receita_bruta || 0), 0),
-        totalLucro: sucessos.reduce((sum, r) => sum + (r.dados?.totais?.lucro_liquido || 0), 0),
-        competencias: sucessos.map(r => r.competencia).sort()
+        totalReceita: ultimaReceita,
+        totalLucro: ultimoLucro,
+        competencias: sucessos.map(r => r.competencia).sort(),
+        valoresAcumulados: true,  // Flag para indicar que são valores acumulados
+        ultimoPeriodo: ultimo.competencia
       });
     }
 
@@ -1637,77 +2101,133 @@ function ImportacaoPage({ onNavigate }) {
     setEtapa('preview');
   };
 
-  const confirmarImportacao = async () => {
+  const confirmarImportacao = async (cnpjOverride = null) => {
+    console.log('[IMPORT] Iniciando confirmarImportacao, cnpjOverride:', cnpjOverride);
+    console.log('[IMPORT] empresaExistente:', empresaExistente);
+    console.log('[IMPORT] dadosConsolidados?.empresa:', dadosConsolidados?.empresa);
+    
     setLoading(true);
     setErro('');
 
     try {
       let empresaId = empresaExistente?.id;
 
-      // Criar empresa se não existe
-      if (!empresaId && dadosConsolidados?.empresa) {
-        const emp = dadosConsolidados.empresa;
+      // Se já tem empresa existente, pular criação
+      if (empresaId) {
+        console.log('[IMPORT] Usando empresa existente ID:', empresaId);
+      } else {
+        // Precisa criar empresa nova
+        const emp = dadosConsolidados?.empresa;
+        
+        if (!emp) {
+          // Não tem dados da empresa - criar com dados mínimos
+          console.log('[IMPORT] Sem dados de empresa, verificando CNPJ manual');
+        }
+        
+        // Determinar CNPJ final
+        const cnpjDoDocumento = emp?.cnpj || '';
+        const cnpjFinal = cnpjOverride || cnpjDoDocumento;
+        
+        console.log('[IMPORT] CNPJ do documento:', cnpjDoDocumento);
+        console.log('[IMPORT] CNPJ final:', cnpjFinal);
+        
+        // Se não tem CNPJ, abrir modal para usuário digitar
+        if (!cnpjFinal || cnpjFinal.trim() === '') {
+          console.log('[IMPORT] CNPJ não encontrado, abrindo modal');
+          setLoading(false);
+          setShowModalCnpj(true);
+          return;
+        }
+        
+        // Determinar nome da empresa
+        const nomeEmpresa = emp?.razao_social || emp?.nome || `Empresa ${cnpjFinal}`;
+        
+        console.log('[IMPORT] Criando empresa:', nomeEmpresa, cnpjFinal);
+        
         const res = await api('/empresas', {
           method: 'POST',
           body: JSON.stringify({
-            razao_social: emp.nome,
-            cnpj: emp.cnpj,
-            regime_tributario: 'Lucro Presumido'
+            razao_social: nomeEmpresa,
+            cnpj: cnpjFinal,
+            regime_tributario: 'Lucro Presumido',
+            sistema_contabil: sistemaContabilSelecionado
           })
         });
 
-        if (!res.ok) throw new Error('Erro ao criar empresa');
+        if (!res.ok) {
+          const errorData = await res.json().catch(() => ({}));
+          throw new Error(errorData.detail || 'Erro ao criar empresa');
+        }
         
         const data = await res.json();
         empresaId = data.id;
-        toast.success(`Empresa "${emp.nome}" criada!`);
+        toast.success(`Empresa "${nomeEmpresa}" criada!`);
       }
 
       // Salvar cada período com TODOS os campos do balancete
       for (const arq of arquivosProcessados.filter(a => a.sucesso)) {
-        const totais = arq.dados?.totais || {};
+        // Dados vêm de arq.dados.dados (estrutura do endpoint preview-lote)
+        const dadosIA = arq.dados?.dados || arq.dados?.totais || arq.dados || {};
         const periodo = arq.dados?.periodo || {};
+
+        console.log('[IMPORT] Salvando arquivo:', arq.nome);
+        console.log('[IMPORT] Dados IA:', dadosIA);
+
+        // Extrai ano e mês do período
+        let competencia = periodo.fim?.substring(0, 7) || arq.competencia;
+        if (!competencia || competencia === 'N/A') {
+          // Tenta extrair do nome do arquivo ou dos dados
+          const ano = dadosIA.ano || new Date().getFullYear();
+          const mes = dadosIA.mes || 1;
+          competencia = `${ano}-${String(mes).padStart(2, '0')}`;
+        }
 
         // Enviar todos os campos expandidos
         const dadosMensais = {
-          competencia: periodo.fim?.substring(0, 7) || arq.competencia,
+          competencia: competencia,
           // Campos básicos (compatibilidade)
-          receita_bruta: totais.receita_bruta || totais.receita_servicos || 0,
-          receita: totais.receita_bruta || totais.receita_servicos || 0,
-          custos: totais.custos_total || 0,
-          despesas: totais.despesas_operacionais || totais.despesas_financeiras || 0,
-          impostos: totais.impostos_total || totais.deducoes_receita || 0,
-          caixa: totais.disponivel || totais.caixa || 0,
-          lucro_liquido: totais.lucro_liquido || totais.lucro_exercicio || 0,
+          receita_bruta: dadosIA.receita_bruta || dadosIA.receita_servicos || 0,
+          receita: dadosIA.receita || dadosIA.receita_bruta || dadosIA.receita_servicos || 0,
+          custos: dadosIA.custos || dadosIA.custos_total || 0,
+          despesas: dadosIA.despesas || dadosIA.despesas_operacionais || 0,
+          impostos: dadosIA.impostos || dadosIA.impostos_sobre_vendas || dadosIA.impostos_total || dadosIA.deducoes_receita || 0,
+          folha: dadosIA.folha || 0,
+          caixa: dadosIA.caixa || dadosIA.disponivel || 0,
+          lucro_liquido: dadosIA.lucro_liquido || 0,
           // Balanço Patrimonial
-          ativo_total: totais.ativo_total || 0,
-          ativo_circulante: totais.ativo_circulante || 0,
-          disponivel: totais.disponivel || 0,
-          bancos: totais.bancos || 0,
-          clientes: totais.clientes || totais.duplicatas_receber || 0,
-          estoques: totais.estoques || 0,
-          passivo_total: totais.passivo_total || 0,
-          passivo_circulante: totais.passivo_circulante || 0,
-          passivo_nao_circulante: totais.passivo_nao_circulante || 0,
-          patrimonio_liquido: totais.patrimonio_liquido || totais.capital_social || 0,
-          capital_social: totais.capital_social || 0,
+          ativo_total: dadosIA.ativo_total || 0,
+          ativo_circulante: dadosIA.ativo_circulante || 0,
+          disponivel: dadosIA.disponivel || 0,
+          bancos: dadosIA.bancos || 0,
+          clientes: dadosIA.clientes || 0,
+          estoques: dadosIA.estoques || 0,
+          passivo_total: dadosIA.passivo_total || 0,
+          passivo_circulante: dadosIA.passivo_circulante || 0,
+          passivo_nao_circulante: dadosIA.passivo_nao_circulante || 0,
+          patrimonio_liquido: dadosIA.patrimonio_liquido || 0,
+          capital_social: dadosIA.capital_social || 0,
+          fornecedores: dadosIA.fornecedores || 0,
           // DRE
-          receita_servicos: totais.receita_servicos || 0,
-          deducoes_receita: totais.deducoes_receita || totais.impostos_sobre_vendas || 0,
-          custos_total: totais.custos_total || 0,
-          despesas_operacionais: totais.despesas_operacionais || 0,
-          despesas_financeiras: totais.despesas_financeiras || 0,
-          receitas_financeiras: totais.receitas_financeiras || 0,
+          receita_servicos: dadosIA.receita_servicos || 0,
+          deducoes_receita: dadosIA.deducoes_receita || 0,
+          custos_total: dadosIA.custos_total || dadosIA.custos || 0,
+          despesas_operacionais: dadosIA.despesas_operacionais || 0,
+          despesas_financeiras: dadosIA.despesas_financeiras || 0,
+          receitas_financeiras: dadosIA.receitas_financeiras || 0,
           // Impostos detalhados
-          iss: totais.iss_deducao || totais.iss_recolher || 0,
-          pis: totais.pis_deducao || totais.pis_recolher || 0,
-          cofins: totais.cofins_deducao || totais.cofins_recolher || 0,
-          irpj: totais.irpj_deducao || totais.irpj_recolher || 0,
-          csll: totais.csll_deducao || totais.csll_recolher || 0,
-          impostos_total: totais.impostos_total || totais.deducoes_receita || 0,
+          iss: dadosIA.iss || 0,
+          pis: dadosIA.pis || dadosIA.pis_deducao || 0,
+          cofins: dadosIA.cofins || dadosIA.cofins_deducao || 0,
+          irpj: dadosIA.irpj || dadosIA.irpj_deducao || 0,
+          csll: dadosIA.csll || dadosIA.csll_deducao || 0,
+          icms: dadosIA.icms || dadosIA.icms_deducao || 0,  // ADICIONADO: ICMS é o maior imposto
+          // CORRIGIDO: Usar mesma fonte que 'impostos' para consistência
+          impostos_total: dadosIA.impostos || dadosIA.impostos_sobre_vendas || dadosIA.impostos_total || dadosIA.deducoes_receita || 0,
           // Meta
           arquivo_origem: arq.nome
         };
+
+        console.log('[IMPORT] Enviando para API:', dadosMensais);
 
         await api(`/empresas/${empresaId}/dados`, {
           method: 'POST',
@@ -1734,11 +2254,151 @@ function ImportacaoPage({ onNavigate }) {
     setEmpresaExistente(null);
     setErro('');
     setProgresso(0);
+    // Reset do modal de CNPJ
+    setShowModalCnpj(false);
+    setCnpjManual('');
+    setErroCnpj('');
+    // Reset da revisão
+    setArquivoSelecionado(null);
+    setDadosRevisao(null);
   };
 
   const formatarMoeda = (valor) => {
     if (!valor && valor !== 0) return '-';
     return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(valor);
+  };
+
+  // === FUNÇÕES DE REVISÃO ===
+  
+  // Abre a tela de revisão para um arquivo específico
+  const abrirRevisao = (arquivo, index) => {
+    console.log('[REVISAO] Abrindo revisão para:', arquivo.nome);
+    
+    // Montar dados para o componente de revisão
+    const dados = arquivo.dados?.dados || arquivo.dados || {};
+    
+    // Criar validação simulada (normalmente viria do backend)
+    const validacao = {
+      confianca: arquivo.dados?.confianca > 80 ? 'alta' : arquivo.dados?.confianca > 60 ? 'media' : 'baixa',
+      confianca_percentual: arquivo.dados?.confianca || 75,
+      metodo_extracao: arquivo.dados?.metodo_usado || 'parser_dominio',
+      resumo: '✅ Dados extraídos com sucesso. Revise os valores antes de confirmar.',
+      alertas: [],
+      dados_validados: dados,
+      campos_editaveis: [
+        // DRE
+        { nome: 'receita_bruta', label: 'Receita Bruta', grupo: 'DRE', obrigatorio: true, tem_erro: false, tem_aviso: false, alertas: [] },
+        { nome: 'receita_servicos', label: 'Receita de Serviços', grupo: 'DRE', obrigatorio: false, tem_erro: false, tem_aviso: false, alertas: [] },
+        { nome: 'deducoes_receita', label: 'Deduções da Receita', grupo: 'DRE', obrigatorio: false, tem_erro: false, tem_aviso: false, alertas: [] },
+        { nome: 'custos', label: 'Custos', grupo: 'DRE', obrigatorio: false, tem_erro: false, tem_aviso: false, alertas: [] },
+        { nome: 'despesas_operacionais', label: 'Despesas Operacionais', grupo: 'DRE', obrigatorio: false, tem_erro: false, tem_aviso: false, alertas: [] },
+        { nome: 'lucro_liquido', label: 'Lucro Líquido', grupo: 'DRE', obrigatorio: true, tem_erro: false, tem_aviso: false, alertas: [] },
+        // Ativo
+        { nome: 'ativo_total', label: 'Ativo Total', grupo: 'Ativo', obrigatorio: true, tem_erro: false, tem_aviso: false, alertas: [] },
+        { nome: 'ativo_circulante', label: 'Ativo Circulante', grupo: 'Ativo', obrigatorio: true, tem_erro: false, tem_aviso: false, alertas: [] },
+        { nome: 'disponivel', label: 'Disponível', grupo: 'Ativo', obrigatorio: false, tem_erro: false, tem_aviso: false, alertas: [] },
+        { nome: 'clientes', label: 'Clientes', grupo: 'Ativo', obrigatorio: false, tem_erro: false, tem_aviso: false, alertas: [] },
+        { nome: 'estoques', label: 'Estoques', grupo: 'Ativo', obrigatorio: false, tem_erro: false, tem_aviso: false, alertas: [] },
+        // Passivo
+        { nome: 'passivo_circulante', label: 'Passivo Circulante', grupo: 'Passivo', obrigatorio: true, tem_erro: false, tem_aviso: false, alertas: [] },
+        { nome: 'passivo_nao_circulante', label: 'Passivo Não Circulante', grupo: 'Passivo', obrigatorio: false, tem_erro: false, tem_aviso: false, alertas: [] },
+        { nome: 'fornecedores', label: 'Fornecedores', grupo: 'Passivo', obrigatorio: false, tem_erro: false, tem_aviso: false, alertas: [] },
+        // PL
+        { nome: 'patrimonio_liquido', label: 'Patrimônio Líquido', grupo: 'PL', obrigatorio: true, tem_erro: false, tem_aviso: false, alertas: [] },
+        { nome: 'capital_social', label: 'Capital Social', grupo: 'PL', obrigatorio: false, tem_erro: false, tem_aviso: false, alertas: [] },
+        // Impostos
+        { nome: 'impostos', label: 'Total Impostos', grupo: 'Impostos', obrigatorio: false, tem_erro: false, tem_aviso: false, alertas: [] },
+      ]
+    };
+    
+    // Adicionar alertas baseados nos valores
+    const receita = parseFloat(dados.receita_bruta) || 0;
+    const lucro = parseFloat(dados.lucro_liquido) || 0;
+    const pl = parseFloat(dados.patrimonio_liquido) || 0;
+    
+    if (lucro > receita && receita > 0) {
+      validacao.alertas.push({
+        tipo: 'erro',
+        campo: 'lucro_liquido',
+        mensagem: 'Lucro maior que receita',
+        detalhes: 'Verifique se os valores estão corretos'
+      });
+      validacao.campos_editaveis.find(c => c.nome === 'lucro_liquido').tem_erro = true;
+    }
+    
+    if (pl > 0 && lucro > 0) {
+      const roe = (lucro / pl) * 100;
+      if (roe > 200) {
+        validacao.alertas.push({
+          tipo: 'aviso',
+          campo: 'roe',
+          mensagem: `ROE muito elevado (${roe.toFixed(1)}%)`,
+          detalhes: 'Verifique se o Patrimônio Líquido está correto'
+        });
+      }
+    }
+    
+    // Adicionar alerta de sucesso se tudo OK
+    if (validacao.alertas.length === 0) {
+      validacao.alertas.push({
+        tipo: 'sucesso',
+        campo: 'geral',
+        mensagem: 'Todos os valores parecem consistentes'
+      });
+    }
+    
+    setArquivoSelecionado({ ...arquivo, index });
+    setDadosRevisao(validacao);
+    setEtapa('revisao');
+  };
+  
+  // Confirma os dados revisados de um arquivo
+  const confirmarRevisao = (dadosEditados) => {
+    console.log('[REVISAO] Confirmando dados editados:', dadosEditados);
+    
+    // Atualizar o arquivo nos processados
+    const novosProcessados = [...arquivosProcessados];
+    const index = arquivoSelecionado.index;
+    
+    // Mesclar dados editados
+    novosProcessados[index] = {
+      ...novosProcessados[index],
+      dados: {
+        ...novosProcessados[index].dados,
+        dados: dadosEditados
+      },
+      revisado: true // Marcar como revisado
+    };
+    
+    setArquivosProcessados(novosProcessados);
+    
+    // Atualizar consolidado se necessário
+    const ultimoPeriodo = novosProcessados.filter(a => a.sucesso).sort((a, b) => 
+      (a.competencia || '').localeCompare(b.competencia || '')
+    ).pop();
+    
+    if (ultimoPeriodo) {
+      const dadosUltimo = ultimoPeriodo.dados?.dados || {};
+      setDadosConsolidados(prev => ({
+        ...prev,
+        totalReceita: dadosUltimo.receita_bruta || dadosUltimo.receita || prev?.totalReceita || 0,
+        totalLucro: dadosUltimo.lucro_liquido || prev?.totalLucro || 0
+      }));
+    }
+    
+    toast.success(`Dados de ${arquivoSelecionado.nome} atualizados!`);
+    
+    // Voltar para preview
+    setArquivoSelecionado(null);
+    setDadosRevisao(null);
+    setEtapa('preview');
+  };
+  
+  // Cancela a revisão e volta para preview
+  const cancelarRevisao = () => {
+    setArquivoSelecionado(null);
+    setDadosRevisao(null);
+    setEtapa('preview');
   };
 
   // ============ ETAPA 1: UPLOAD MÚLTIPLO ============
@@ -1747,10 +2407,25 @@ function ImportacaoPage({ onNavigate }) {
       <div>
         <Header 
           title="Importação de Balancetes" 
-          subtitle="Importe múltiplos arquivos - cada um representa um mês"
+          subtitle="Importe os balancetes mensais da empresa para análise financeira"
         />
 
         <Card className="p-6 mb-4">
+          {/* Aviso sobre balancetes */}
+          <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+            <div className="flex items-start gap-3">
+              <FileSpreadsheet className="w-5 h-5 text-blue-600 mt-0.5" />
+              <div>
+                <h4 className="font-semibold text-blue-800 mb-1">Importe Balancetes Mensais</h4>
+                <p className="text-sm text-blue-700">
+                  Aceitamos balancetes em PDF ou Excel dos principais sistemas contábeis 
+                  (Domínio, Questor, Prosoft, etc.). Cada arquivo deve corresponder a um mês.
+                  Para melhores análises, importe pelo menos 3 meses de dados.
+                </p>
+              </div>
+            </div>
+          </div>
+
           {erro && (
             <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 flex items-center gap-2">
               <AlertTriangle className="w-5 h-5" />
@@ -1770,14 +2445,14 @@ function ImportacaoPage({ onNavigate }) {
           >
             <Upload className="w-12 h-12 text-slate-400 mx-auto mb-3" />
             <h3 className="text-lg font-semibold text-slate-700 mb-1">
-              Arraste seus arquivos aqui
+              Arraste seus balancetes aqui
             </h3>
             <p className="text-slate-500 mb-4 text-sm">
-              Você pode selecionar múltiplos arquivos de uma vez
+              Selecione múltiplos arquivos de uma vez (um por mês)
             </p>
             <input
               type="file"
-              accept=".pdf,.xls,.xlsx"
+              accept=".pdf"
               onChange={handleFileSelect}
               className="hidden"
               id="file-upload-import"
@@ -1791,10 +2466,249 @@ function ImportacaoPage({ onNavigate }) {
               Selecionar Arquivos
             </label>
             <p className="text-xs text-slate-400 mt-3">
-              PDF, XLS, XLSX • Cada arquivo = 1 mês de dados
+              PDF • Cada arquivo = 1 mês de dados
             </p>
           </div>
         </Card>
+
+        {/* Sistema Contábil Detectado/Selecionado */}
+        <Card className="p-4 mb-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">
+                Sistema Contábil
+              </label>
+              {detectando ? (
+                <div className="flex items-center gap-2 text-slate-500">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Detectando sistema...</span>
+                </div>
+              ) : sistemaSelecionado ? (
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-medium text-slate-900">{sistemaSelecionado.nome}</span>
+                  {sistemaSelecionado.fabricante && (
+                    <span className="text-sm text-slate-500">({sistemaSelecionado.fabricante})</span>
+                  )}
+                  {sistemaSelecionado.tem_parser ? (
+                    <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded">
+                      Importação rápida
+                    </span>
+                  ) : (
+                    <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded">
+                      Via IA
+                    </span>
+                  )}
+                  {getSistemaPreferido() && (
+                    <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded">
+                      Preferência salva
+                    </span>
+                  )}
+                </div>
+              ) : (
+                <span className="text-slate-500">Adicione um arquivo para detectar automaticamente</span>
+              )}
+            </div>
+            {sistemaContabilSelecionado !== null && (
+              <div className="flex gap-2">
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={() => {
+                    // Se tinha preferência, limpa primeiro
+                    if (getSistemaPreferido()) {
+                      limparPreferencia();
+                    }
+                    setSistemaContabilSelecionado(null);
+                    setShowListaSistemas(true);
+                    setShowModalDeteccao(true);
+                  }}
+                >
+                  Trocar Sistema
+                </Button>
+              </div>
+            )}
+          </div>
+          {sistemaSelecionado && (
+            <p className="mt-2 text-sm">
+              {sistemaSelecionado.tem_parser ? (
+                <span className="text-green-600">
+                  ✓ Importação automática disponível - grátis e instantânea!
+                </span>
+              ) : (
+                <span className="text-amber-600">
+                  ○ Será usada IA para extrair os dados (pode demorar um pouco)
+                </span>
+              )}
+            </p>
+          )}
+          {getSistemaPreferido() && (
+            <p className="mt-2 text-xs text-blue-600">
+              Sistema salvo como preferência. Clique em "Trocar Sistema" para selecionar outro.
+            </p>
+          )}
+        </Card>
+
+        {/* Modal de Detecção de Sistema */}
+        {showModalDeteccao && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6">
+              {!showListaSistemas && sistemaDetectado ? (
+                <>
+                  <div className="text-center mb-6">
+                    <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                      <FileSpreadsheet className="w-8 h-8 text-blue-600" />
+                    </div>
+                    <h3 className="text-xl font-bold text-slate-800 mb-2">
+                      Sistema Detectado
+                    </h3>
+                    <p className="text-slate-600">
+                      Identificamos que seu arquivo é do sistema:
+                    </p>
+                    <div className="mt-3 p-4 bg-blue-50 rounded-lg">
+                      <span className="font-bold text-blue-800 text-lg">
+                        {sistemaDetectado.nome}
+                      </span>
+                      {sistemaDetectado.fabricante && (
+                        <p className="text-sm text-blue-600">{sistemaDetectado.fabricante}</p>
+                      )}
+                      <div className="flex items-center justify-center gap-2 mt-2">
+                        {sistemaDetectado.tem_parser ? (
+                          <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded flex items-center gap-1">
+                            <CheckCircle className="w-3 h-3" />
+                            Importação rápida disponível
+                          </span>
+                        ) : (
+                          <span className="text-xs bg-amber-100 text-amber-700 px-2 py-1 rounded">
+                            Usaremos IA para processar
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-blue-500 mt-2">
+                        Confiança: {confiancaDeteccao}%
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 mb-6 p-3 bg-slate-50 rounded-lg">
+                    <input
+                      type="checkbox"
+                      id="lembrar"
+                      checked={lembrarEscolha}
+                      onChange={(e) => setLembrarEscolha(e.target.checked)}
+                      className="w-4 h-4 text-blue-600 rounded border-slate-300"
+                    />
+                    <label htmlFor="lembrar" className="text-sm text-slate-700">
+                      Lembrar minha escolha (não perguntar novamente)
+                    </label>
+                  </div>
+
+                  <div className="flex gap-3">
+                    <Button
+                      className="flex-1"
+                      onClick={confirmarSistemaDetectado}
+                    >
+                      <Check className="w-4 h-4 mr-2" />
+                      Sim, está correto
+                    </Button>
+                    <Button
+                      variant="outline"
+                      className="flex-1"
+                      onClick={() => setShowListaSistemas(true)}
+                    >
+                      Não, é outro
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="mb-4">
+                    <h3 className="text-xl font-bold text-slate-800 mb-2">
+                      Selecione o Sistema Contábil
+                    </h3>
+                    <p className="text-slate-600 text-sm">
+                      Qual sistema gerou os arquivos que você está importando?
+                    </p>
+                  </div>
+
+                  <div className="mb-4">
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={buscaSistema}
+                        onChange={(e) => setBuscaSistema(e.target.value)}
+                        placeholder="Buscar sistema..."
+                        className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 pr-10"
+                      />
+                      <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                    </div>
+                  </div>
+
+                  <div className="max-h-60 overflow-y-auto border border-slate-200 rounded-lg mb-4">
+                    {sistemasFiltrados.map(sistema => (
+                      <div
+                        key={sistema.id}
+                        onClick={() => selecionarOutroSistema(sistema)}
+                        className="px-3 py-3 cursor-pointer hover:bg-blue-50 border-b border-slate-100 last:border-0 flex items-center justify-between"
+                      >
+                        <div>
+                          <div className="font-medium text-slate-900">{sistema.nome}</div>
+                          {sistema.fabricante && (
+                            <div className="text-xs text-slate-500">{sistema.fabricante}</div>
+                          )}
+                        </div>
+                        {sistema.tem_parser ? (
+                          <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded flex items-center gap-1">
+                            <CheckCircle className="w-3 h-3" />
+                            Rápido
+                          </span>
+                        ) : sistema.id !== 0 && (
+                          <span className="text-xs bg-slate-100 text-slate-500 px-2 py-0.5 rounded">
+                            Via IA
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="flex items-center gap-2 mb-4 p-3 bg-slate-50 rounded-lg">
+                    <input
+                      type="checkbox"
+                      id="lembrar2"
+                      checked={lembrarEscolha}
+                      onChange={(e) => setLembrarEscolha(e.target.checked)}
+                      className="w-4 h-4 text-blue-600 rounded border-slate-300"
+                    />
+                    <label htmlFor="lembrar2" className="text-sm text-slate-700">
+                      Lembrar minha escolha
+                    </label>
+                  </div>
+
+                  <div className="flex gap-2">
+                    {sistemaDetectado && (
+                      <Button
+                        variant="outline"
+                        onClick={() => setShowListaSistemas(false)}
+                      >
+                        <ArrowLeft className="w-4 h-4 mr-1" />
+                        Voltar
+                      </Button>
+                    )}
+                    <Button
+                      variant="outline"
+                      className="flex-1"
+                      onClick={() => {
+                        setShowModalDeteccao(false);
+                        setShowListaSistemas(false);
+                      }}
+                    >
+                      Cancelar
+                    </Button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Lista de arquivos selecionados */}
         {arquivos.length > 0 && (
@@ -1873,16 +2787,70 @@ function ImportacaoPage({ onNavigate }) {
     );
   }
 
+  // ============ ETAPA REVISÃO: Edição Individual de Arquivo ============
+  if (etapa === 'revisao' && arquivoSelecionado && dadosRevisao) {
+    return (
+      <div>
+        <Header 
+          title="Revisar Dados do Arquivo" 
+          subtitle={arquivoSelecionado.nome}
+          actions={
+            <Button variant="ghost" onClick={cancelarRevisao}>
+              <ArrowLeft className="w-4 h-4" /> Voltar
+            </Button>
+          }
+        />
+        
+        <div className="mt-4">
+          <RevisaoImportacao
+            dadosValidacao={dadosRevisao}
+            empresa={dadosConsolidados?.empresa?.nome || dadosConsolidados?.empresa?.razao_social}
+            periodo={arquivoSelecionado.competencia}
+            onConfirmar={confirmarRevisao}
+            onCancelar={cancelarRevisao}
+            carregando={carregandoRevisao}
+          />
+        </div>
+      </div>
+    );
+  }
+
   // ============ ETAPA 3: PREVIEW ============
   if (etapa === 'preview') {
     const sucessos = arquivosProcessados.filter(a => a.sucesso);
     const erros = arquivosProcessados.filter(a => !a.sucesso);
-    const empresa = dadosConsolidados?.empresa || {};
+    const empresaRaw = dadosConsolidados?.empresa || {};
+    // Normalizar: alguns endpoints retornam razao_social, outros nome
+    const empresa = {
+      ...empresaRaw,
+      nome: empresaRaw.razao_social || empresaRaw.nome || '-'
+    };
     
     // Pegar último período para indicadores
     const ultimoPeriodo = sucessos.length > 0 ? sucessos[sucessos.length - 1].dados : null;
-    const indicadores = ultimoPeriodo?.indicadores || {};
-    const totaisUltimo = ultimoPeriodo?.totais || {};
+    // Dados vêm de ultimoPeriodo.dados (estrutura do endpoint preview-lote)
+    const dadosUltimo = ultimoPeriodo?.dados || ultimoPeriodo?.totais || {};
+    
+    // Calcular indicadores a partir dos dados
+    const receita = dadosUltimo.receita_bruta || dadosUltimo.receita || 0;
+    const lucro = dadosUltimo.lucro_liquido || 0;
+    const ativoCirc = dadosUltimo.ativo_circulante || 0;
+    const passivoCirc = dadosUltimo.passivo_circulante || 1;
+    const patrimonio = dadosUltimo.patrimonio_liquido || 1;
+    // Usar impostos em ordem de prioridade: impostos > impostos_sobre_vendas > deducoes_receita
+    const impostos = dadosUltimo.impostos || dadosUltimo.impostos_sobre_vendas || dadosUltimo.deducoes_receita || 0;
+    
+    console.log('[INDICADORES] Dados para cálculo:', {
+      receita, lucro, impostos,
+      fonteImpostos: dadosUltimo.impostos ? 'impostos' : (dadosUltimo.impostos_sobre_vendas ? 'impostos_sobre_vendas' : 'deducoes_receita')
+    });
+    
+    const indicadores = {
+      margem_liquida: receita > 0 ? ((lucro / receita) * 100).toFixed(1) : 0,
+      liquidez_corrente: passivoCirc > 0 ? (ativoCirc / passivoCirc).toFixed(2) : 0,
+      roe: patrimonio > 0 ? ((lucro / patrimonio) * 100).toFixed(1) : 0,
+      carga_tributaria: receita > 0 ? ((impostos / receita) * 100).toFixed(1) : 0
+    };
 
     return (
       <div>
@@ -1923,6 +2891,12 @@ function ImportacaoPage({ onNavigate }) {
                   <p className="text-sm text-green-600">
                     "{empresa.nome}" com {sucessos.length} meses de dados
                   </p>
+                  {(!empresa.cnpj || empresa.cnpj === '-') && (
+                    <p className="text-xs text-amber-600 mt-1 flex items-center gap-1">
+                      <AlertTriangle className="w-3 h-3" />
+                      CNPJ não encontrado no documento - será solicitado ao confirmar
+                    </p>
+                  )}
                 </div>
               </>
             )}
@@ -1938,7 +2912,14 @@ function ImportacaoPage({ onNavigate }) {
             </h3>
             <div className="space-y-2 text-sm">
               <p className="font-medium">{empresa.nome || '-'}</p>
-              <p className="text-slate-500">{empresa.cnpj_formatado || empresa.cnpj || '-'}</p>
+              {empresa.cnpj && empresa.cnpj !== '-' ? (
+                <p className="text-slate-500">{empresa.cnpj_formatado || empresa.cnpj}</p>
+              ) : (
+                <p className="text-amber-600 text-xs flex items-center gap-1">
+                  <AlertTriangle className="w-3 h-3" />
+                  CNPJ não informado
+                </p>
+              )}
               {empresa.contador?.nome && (
                 <p className="text-slate-500 text-xs">Contador: {empresa.contador.nome}</p>
               )}
@@ -1949,7 +2930,12 @@ function ImportacaoPage({ onNavigate }) {
           <Card className="p-4">
             <h3 className="font-semibold text-slate-800 mb-3 flex items-center gap-2">
               <TrendingUp className="w-5 h-5 text-green-600" />
-              Total Acumulado
+              Acumulado do Exercício
+              {dadosConsolidados?.ultimoPeriodo && (
+                <span className="text-xs text-slate-500 font-normal">
+                  (até {dadosConsolidados.ultimoPeriodo})
+                </span>
+              )}
             </h3>
             <div className="space-y-2">
               <div className="flex justify-between">
@@ -1965,7 +2951,7 @@ function ImportacaoPage({ onNavigate }) {
                 </span>
               </div>
               <div className="flex justify-between">
-                <span className="text-sm text-slate-500">Margem Média:</span>
+                <span className="text-sm text-slate-500">Margem:</span>
                 <span className="font-semibold">
                   {dadosConsolidados?.totalReceita > 0 
                     ? ((dadosConsolidados.totalLucro / dadosConsolidados.totalReceita) * 100).toFixed(1) 
@@ -1973,66 +2959,151 @@ function ImportacaoPage({ onNavigate }) {
                 </span>
               </div>
             </div>
+            {dadosConsolidados?.valoresAcumulados && (
+              <p className="text-xs text-blue-600 mt-2 flex items-center gap-1">
+                <Info className="w-3 h-3" />
+                Valores acumulados no exercício
+              </p>
+            )}
           </Card>
 
-          {/* Indicadores do Último Período */}
-          <Card className="p-4">
+          {/* Info sobre indicadores */}
+          <Card className="p-4 bg-slate-50 border-slate-200">
             <h3 className="font-semibold text-slate-800 mb-3 flex items-center gap-2">
-              <BarChart3 className="w-5 h-5 text-purple-600" />
-              Último Período
+              <BarChart3 className="w-5 h-5 text-slate-500" />
+              Indicadores Financeiros
             </h3>
-            <div className="grid grid-cols-2 gap-2 text-center">
-              <div className="p-2 bg-slate-50 rounded">
-                <p className="text-lg font-bold text-blue-600">{indicadores.margem_liquida || 0}%</p>
-                <p className="text-xs text-slate-500">Margem</p>
+            <div className="text-center py-4">
+              <p className="text-sm text-slate-600 mb-2">
+                Os indicadores serão calculados após a revisão
+              </p>
+              <div className="flex flex-wrap justify-center gap-2 text-xs text-slate-500">
+                <span className="px-2 py-1 bg-white rounded border">ROE</span>
+                <span className="px-2 py-1 bg-white rounded border">Margem</span>
+                <span className="px-2 py-1 bg-white rounded border">Liquidez</span>
+                <span className="px-2 py-1 bg-white rounded border">Carga Tributária</span>
               </div>
-              <div className="p-2 bg-slate-50 rounded">
-                <p className="text-lg font-bold text-green-600">{indicadores.liquidez_corrente || 0}</p>
-                <p className="text-xs text-slate-500">Liquidez</p>
-              </div>
-              <div className="p-2 bg-slate-50 rounded">
-                <p className="text-lg font-bold text-purple-600">{indicadores.roe > 1000 ? '>1000' : indicadores.roe || 0}%</p>
-                <p className="text-xs text-slate-500">ROE</p>
-              </div>
-              <div className="p-2 bg-slate-50 rounded">
-                <p className="text-lg font-bold text-orange-600">{indicadores.carga_tributaria || 0}%</p>
-                <p className="text-xs text-slate-500">Tributos</p>
-              </div>
+              <p className="text-xs text-slate-400 mt-3">
+                Revise os dados de cada arquivo para garantir precisão
+              </p>
             </div>
           </Card>
         </div>
 
+        {/* Aviso sobre revisão */}
+        {sucessos.some(arq => {
+          const metodo = arq.dados?.metodo_usado || arq.dados?.metodo || '';
+          return metodo.toLowerCase().includes('ia') || metodo.toLowerCase().includes('claude');
+        }) ? (
+          <div className="mb-4 p-4 bg-amber-50 border-l-4 border-amber-400 rounded-lg">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="w-6 h-6 text-amber-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <h4 className="font-semibold text-amber-800">Alguns arquivos foram processados por IA</h4>
+                <p className="text-sm text-amber-700 mt-1">
+                  A IA pode cometer erros na extração. <strong>É obrigatório revisar cada arquivo</strong> comparando com o documento original antes de confirmar.
+                </p>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="mb-4 p-4 bg-blue-50 border-l-4 border-blue-400 rounded-lg">
+            <div className="flex items-start gap-3">
+              <CheckCircle className="w-6 h-6 text-blue-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <h4 className="font-semibold text-blue-800">Dados extraídos por Parser Local</h4>
+                <p className="text-sm text-blue-700 mt-1">
+                  Os dados foram extraídos automaticamente do sistema Domínio. Recomendamos uma revisão rápida para garantir que os valores estão corretos.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Lista de arquivos processados */}
         <Card className="p-4 mb-4">
-          <h3 className="font-semibold text-slate-800 mb-3">Arquivos Processados</h3>
+          <h3 className="font-semibold text-slate-800 mb-3 flex items-center justify-between">
+            <span>Arquivos Processados</span>
+            <span className="text-xs font-normal text-slate-500">
+              Clique em "Revisar" para verificar/editar os valores
+            </span>
+          </h3>
           <div className="space-y-2 max-h-60 overflow-y-auto">
-            {arquivosProcessados.map((arq, i) => (
+            {arquivosProcessados.map((arq, i) => {
+              const metodo = arq.dados?.metodo_usado || arq.dados?.metodo || '';
+              const isIA = metodo.toLowerCase().includes('ia') || metodo.toLowerCase().includes('claude');
+              return (
               <div 
                 key={i} 
-                className={`flex items-center justify-between p-3 rounded-lg ${
-                  arq.sucesso ? 'bg-green-50' : 'bg-red-50'
+                className={`flex items-center justify-between p-3 rounded-lg border-2 transition-all ${
+                  arq.sucesso 
+                    ? arq.revisado 
+                      ? 'bg-blue-50 border-blue-200' 
+                      : isIA 
+                        ? 'bg-amber-50 border-amber-200 hover:border-amber-400'
+                        : 'bg-green-50 border-green-200 hover:border-blue-400' 
+                    : 'bg-red-50 border-red-200'
                 }`}
               >
                 <div className="flex items-center gap-3">
                   {arq.sucesso ? (
-                    <CheckCircle className="w-5 h-5 text-green-600" />
+                    arq.revisado ? (
+                      <div className="w-5 h-5 bg-blue-600 rounded-full flex items-center justify-center">
+                        <CheckCircle className="w-3 h-3 text-white" />
+                      </div>
+                    ) : isIA ? (
+                      <div className="w-5 h-5 bg-amber-500 rounded-full flex items-center justify-center">
+                        <AlertTriangle className="w-3 h-3 text-white" />
+                      </div>
+                    ) : (
+                      <CheckCircle className="w-5 h-5 text-green-600" />
+                    )
                   ) : (
                     <AlertTriangle className="w-5 h-5 text-red-600" />
                   )}
                   <div>
-                    <p className="font-medium text-slate-800">{arq.nome}</p>
-                    <p className={`text-xs ${arq.sucesso ? 'text-green-600' : 'text-red-600'}`}>
-                      {arq.sucesso ? `Competência: ${arq.competencia}` : arq.erro}
+                    <p className="font-medium text-slate-800 flex items-center gap-2">
+                      {arq.nome}
+                      {arq.revisado && (
+                        <span className="text-xs bg-blue-600 text-white px-2 py-0.5 rounded-full">
+                          ✓ Revisado
+                        </span>
+                      )}
+                      {isIA && !arq.revisado && (
+                        <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full border border-purple-300">
+                          🤖 IA
+                        </span>
+                      )}
+                    </p>
+                    <p className={`text-xs ${arq.sucesso ? (isIA && !arq.revisado ? 'text-amber-600' : 'text-green-600') : 'text-red-600'}`}>
+                      {arq.sucesso 
+                        ? `Competência: ${arq.competencia}${isIA && !arq.revisado ? ' • Revisão obrigatória' : ''}` 
+                        : arq.erro}
                     </p>
                   </div>
                 </div>
-                {arq.sucesso && arq.dados?.totais?.receita_bruta && (
-                  <span className="text-sm text-slate-600">
-                    {formatarMoeda(arq.dados.totais.receita_bruta)}
-                  </span>
-                )}
+                <div className="flex items-center gap-3">
+                  {arq.sucesso && (arq.dados?.dados?.receita_bruta || arq.dados?.dados?.receita) && (
+                    <span className="text-sm font-medium text-green-700">
+                      {formatarMoeda(arq.dados.dados.receita_bruta || arq.dados.dados.receita)}
+                    </span>
+                  )}
+                  {arq.sucesso && (
+                    <button
+                      onClick={() => abrirRevisao(arq, i)}
+                      className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors flex items-center gap-1 ${
+                        isIA && !arq.revisado
+                          ? 'bg-amber-100 text-amber-700 hover:bg-amber-200'
+                          : 'bg-blue-100 text-blue-700 hover:bg-blue-200'
+                      }`}
+                    >
+                      <Eye className="w-3 h-3" />
+                      {arq.revisado ? 'Editar' : isIA ? '⚠️ Revisar' : 'Revisar'}
+                    </button>
+                  )}
+                </div>
               </div>
-            ))}
+            )})}
           </div>
         </Card>
 
@@ -2054,19 +3125,108 @@ function ImportacaoPage({ onNavigate }) {
         <div className="flex justify-end gap-3">
           <Button variant="secondary" onClick={resetar}>Cancelar</Button>
           {sucessos.length > 0 && (
-            <Button onClick={confirmarImportacao} loading={loading}>
+            <Button onClick={() => confirmarImportacao(null)} loading={loading}>
               <CheckCircle className="w-4 h-4" />
               {empresaExistente ? `Adicionar ${sucessos.length} meses` : `Criar Empresa e Importar`}
             </Button>
           )}
         </div>
+
+        {/* Modal de CNPJ não encontrado */}
+        {showModalCnpj && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6">
+              <div className="text-center mb-6">
+                <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <AlertTriangle className="w-8 h-8 text-amber-600" />
+                </div>
+                <h3 className="text-xl font-bold text-slate-800 mb-2">
+                  CNPJ não encontrado
+                </h3>
+                <p className="text-slate-600">
+                  Não foi possível identificar o CNPJ da empresa no documento. 
+                  Por favor, informe o CNPJ manualmente para continuar.
+                </p>
+              </div>
+
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-slate-700 mb-2">
+                  CNPJ da Empresa
+                </label>
+                <input
+                  type="text"
+                  value={cnpjManual}
+                  onChange={(e) => {
+                    // Formatar CNPJ automaticamente
+                    let valor = e.target.value.replace(/\D/g, '');
+                    if (valor.length > 14) valor = valor.slice(0, 14);
+                    if (valor.length > 12) {
+                      valor = valor.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2}).*/, '$1.$2.$3/$4-$5');
+                    } else if (valor.length > 8) {
+                      valor = valor.replace(/^(\d{2})(\d{3})(\d{3})(\d*).*/, '$1.$2.$3/$4');
+                    } else if (valor.length > 5) {
+                      valor = valor.replace(/^(\d{2})(\d{3})(\d*).*/, '$1.$2.$3');
+                    } else if (valor.length > 2) {
+                      valor = valor.replace(/^(\d{2})(\d*).*/, '$1.$2');
+                    }
+                    setCnpjManual(valor);
+                    setErroCnpj('');
+                  }}
+                  placeholder="00.000.000/0000-00"
+                  className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-lg text-center tracking-wider"
+                />
+                {erroCnpj && (
+                  <p className="text-red-500 text-sm mt-2">{erroCnpj}</p>
+                )}
+              </div>
+
+              <div className="flex gap-3">
+                <Button
+                  className="flex-1"
+                  onClick={() => {
+                    // Validar CNPJ
+                    const cnpjLimpo = cnpjManual.replace(/\D/g, '');
+                    if (cnpjLimpo.length !== 14) {
+                      setErroCnpj('CNPJ deve ter 14 dígitos');
+                      return;
+                    }
+                    // Fechar modal e continuar importação com CNPJ manual
+                    setShowModalCnpj(false);
+                    setCnpjManual('');
+                    setErroCnpj('');
+                    // Continuar a importação passando o CNPJ
+                    confirmarImportacao(cnpjLimpo);
+                  }}
+                  disabled={cnpjManual.replace(/\D/g, '').length !== 14}
+                >
+                  <Check className="w-4 h-4 mr-2" />
+                  Confirmar e Continuar
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setShowModalCnpj(false);
+                    setCnpjManual('');
+                    setErroCnpj('');
+                  }}
+                >
+                  Cancelar
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
 
   // ============ ETAPA 4: SUCESSO ============
   if (etapa === 'sucesso') {
-    const empresa = dadosConsolidados?.empresa || {};
+    const empresaRaw = dadosConsolidados?.empresa || {};
+    const empresa = {
+      ...empresaRaw,
+      nome: empresaRaw.razao_social || empresaRaw.nome || '-'
+    };
     const sucessos = arquivosProcessados.filter(a => a.sucesso);
     
     return (

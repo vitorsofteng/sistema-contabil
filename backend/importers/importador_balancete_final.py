@@ -1,9 +1,9 @@
 """
 Importador Final de Balancetes - Sistema Contábil
-Extrai TODAS as informações do balancete PDF/XLS
+Extrai TODAS as informações do balancete PDF
 
 Este módulo:
-1. Lê arquivos XLS antigos (Excel 97-2003) e PDF
+1. Lê arquivos PDF
 2. Extrai empresa, CNPJ, período, contador
 3. Mapeia TODAS as contas do plano de contas
 4. Identifica clientes, fornecedores e sócios
@@ -455,110 +455,15 @@ CAMPOS_VALORES = {
 
 
 # ============================================================================
-# PARSER DE ARQUIVOS XLS
-# ============================================================================
-
-class ParserXLS:
-    """Parser para arquivos XLS antigos (Excel 97-2003)."""
-    
-    def extrair_dados(self, conteudo: bytes) -> Tuple[List[str], List[float], List[int]]:
-        """
-        Extrai strings, valores monetários e códigos de contas.
-        
-        Returns:
-            Tuple com (strings, valores_monetarios, codigos_contas)
-        """
-        strings = self._extrair_strings(conteudo)
-        valores, codigos = self._extrair_numeros(conteudo)
-        return strings, valores, codigos
-    
-    def _extrair_strings(self, data: bytes) -> List[Tuple[int, str]]:
-        """Extrai strings UTF-16LE com suas posições."""
-        strings = []
-        i = 0
-        
-        while i < len(data) - 1:
-            # Verificar se parece início de string UTF-16LE
-            # (caractere ASCII seguido de 0x00)
-            first_byte = data[i]
-            second_byte = data[i+1]
-            
-            if ((32 <= first_byte < 127) or (48 <= first_byte <= 57)) and second_byte == 0:
-                texto = []
-                j = i
-                while j < len(data) - 1:
-                    low = data[j]
-                    high = data[j+1] if j+1 < len(data) else 0
-                    char_code = low | (high << 8)
-                    
-                    # Caracteres válidos (incluindo números e pontuação para CNPJ)
-                    if (32 <= char_code < 127) or (0xC0 <= char_code <= 0xFF) or char_code in [0x28, 0x29, 0x2D, 0x2F, 0x2E, 0x2C, 0x3A]:
-                        texto.append(chr(char_code))
-                        j += 2
-                    elif char_code == 0:
-                        break
-                    else:
-                        break
-                
-                if len(texto) >= 2:
-                    s = ''.join(texto).strip()
-                    # Limpar caracteres extras no final (exceto para CNPJ)
-                    if not re.match(r'\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2}', s):
-                        s = re.sub(r'[%$#*&]+$', '', s).strip()
-                    if s and len(s) >= 2:
-                        strings.append((i, s))
-                    i = j
-                else:
-                    i += 2
-            else:
-                i += 1
-        
-        # Buscar CNPJ diretamente (fallback)
-        cnpj_pattern = rb'(\d)\x00(\d)\x00[.]\x00(\d)\x00(\d)\x00(\d)\x00[.]\x00(\d)\x00(\d)\x00(\d)\x00[/]\x00(\d)\x00(\d)\x00(\d)\x00(\d)\x00[-]\x00(\d)\x00(\d)\x00'
-        for match in re.finditer(cnpj_pattern, data):
-            pos = match.start()
-            # Decodificar CNPJ
-            cnpj_bytes = data[pos:pos+36]
-            try:
-                cnpj = cnpj_bytes.decode('utf-16-le')
-                if cnpj not in [s[1] for s in strings]:
-                    strings.append((pos, cnpj))
-            except:
-                pass
-        
-        return strings
-    
-    def _extrair_numeros(self, data: bytes) -> Tuple[List[float], List[int]]:
-        """Extrai valores monetários e códigos de contas."""
-        valores = []
-        codigos = set()
-        
-        for i in range(0, len(data) - 8):
-            try:
-                val = struct.unpack('<d', data[i:i+8])[0]
-                if 0.01 <= abs(val) <= 1e12:
-                    rounded = round(val, 2)
-                    if abs(val - rounded) < 0.001 and rounded > 0:
-                        # Separar códigos de contas de valores monetários
-                        if rounded == int(rounded) and rounded < 2000:
-                            codigos.add(int(rounded))
-                        else:
-                            valores.append(rounded)
-            except:
-                pass
-        
-        return list(set(valores)), list(codigos)
-
-
 # ============================================================================
 # IMPORTADOR PRINCIPAL
 # ============================================================================
 
 class ImportadorBalancete:
-    """Importador de balancetes PDF/XLS."""
+    """Importador de balancetes PDF."""
     
     def __init__(self):
-        self.parser_xls = ParserXLS()
+        pass
     
     def importar(self, conteudo: bytes, nome_arquivo: str) -> ResultadoImportacao:
         """Importa balancete de arquivo."""
@@ -567,12 +472,10 @@ class ImportadorBalancete:
         try:
             if extensao == '.pdf':
                 return self._importar_pdf(conteudo, nome_arquivo)
-            elif extensao in ['.xls', '.xlsx', '.xlsm']:
-                return self._importar_excel(conteudo, nome_arquivo)
             else:
                 return ResultadoImportacao(
                     sucesso=False,
-                    mensagem=f"Formato não suportado: {extensao}. Use PDF ou XLS/XLSX."
+                    mensagem=f"Formato não suportado: {extensao}. Use PDF."
                 )
         except Exception as e:
             return ResultadoImportacao(
@@ -580,276 +483,6 @@ class ImportadorBalancete:
                 mensagem=f"Erro ao processar: {str(e)}",
                 erros=[str(e)]
             )
-    
-    def _importar_excel(self, conteudo: bytes, nome_arquivo: str) -> ResultadoImportacao:
-        """Importa arquivo Excel."""
-        # Verificar formato
-        if conteudo[:4] == b'\xd0\xcf\x11\xe0':
-            return self._importar_xls_binario(conteudo, nome_arquivo)
-        elif conteudo[:2] == b'PK':
-            return self._importar_xlsx(conteudo, nome_arquivo)
-        else:
-            return self._importar_xls_binario(conteudo, nome_arquivo)
-    
-    def _importar_xls_binario(self, conteudo: bytes, nome_arquivo: str) -> ResultadoImportacao:
-        """Importa XLS usando parser binário."""
-        avisos = []
-        erros = []
-        
-        # Extrair dados
-        strings, valores, codigos = self.parser_xls.extrair_dados(conteudo)
-        
-        # Concatenar strings para extração de texto
-        texto = '\n'.join([s[1] for s in strings])
-        
-        # Extrair metadados
-        cnpj = self._extrair_cnpj(texto)
-        if not cnpj:
-            return ResultadoImportacao(
-                sucesso=False,
-                mensagem="CNPJ não encontrado no documento",
-                erros=["CNPJ não identificado"]
-            )
-        
-        nome_empresa = self._extrair_nome_empresa(texto)
-        if not nome_empresa:
-            nome_empresa = "EMPRESA NÃO IDENTIFICADA"
-            avisos.append("Nome da empresa não identificado automaticamente")
-        
-        periodo_inicio, periodo_fim = self._extrair_periodo(texto)
-        if not periodo_inicio:
-            avisos.append("Período não identificado, usando data atual")
-            periodo_fim = date.today()
-            periodo_inicio = periodo_fim.replace(day=1)
-        
-        contador_nome, contador_crc, contador_cpf = self._extrair_contador(texto)
-        sistema = self._extrair_sistema(texto)
-        
-        # Criar empresa
-        empresa = DadosEmpresa(
-            nome=nome_empresa,
-            cnpj=cnpj,
-            contador_nome=contador_nome,
-            contador_crc=contador_crc,
-            contador_cpf=contador_cpf,
-            sistema_origem=sistema
-        )
-        
-        # Processar contas
-        contas, totais, mapeamento, preview = self._processar_contas(strings, valores, codigos)
-        
-        # Identificar sócios
-        socios = self._identificar_socios(strings, valores, totais)
-        empresa.socios = socios
-        
-        # Identificar clientes
-        clientes = self._identificar_clientes(strings, valores)
-        
-        # Calcular totais adicionais
-        self._calcular_totais_adicionais(totais)
-        
-        # Criar balancete
-        balancete = BalanceteImportado(
-            empresa=empresa,
-            periodo_inicio=periodo_inicio,
-            periodo_fim=periodo_fim,
-            contas=contas,
-            clientes=clientes,
-            totais=totais,
-            arquivo_origem=nome_arquivo,
-            hash_arquivo=hashlib.md5(conteudo).hexdigest()
-        )
-        
-        return ResultadoImportacao(
-            sucesso=True,
-            mensagem=f"Balancete importado com sucesso: {nome_empresa}",
-            balancete=balancete,
-            avisos=avisos,
-            erros=erros,
-            preview_contas=preview,
-            mapeamento=mapeamento
-        )
-    
-    def _importar_xlsx(self, conteudo: bytes, nome_arquivo: str) -> ResultadoImportacao:
-        """Importa XLSX moderno."""
-        try:
-            import openpyxl
-            import io
-            
-            wb = openpyxl.load_workbook(io.BytesIO(conteudo), data_only=True)
-            ws = wb.active
-            
-            strings = []
-            valores = []
-            codigos = []
-            
-            # Extrair dados linha a linha para melhor associação
-            linhas_dados = []
-            
-            for row in ws.iter_rows():
-                linha_str = []
-                linha_val = []
-                for cell in row:
-                    val = cell.value
-                    if val:
-                        if isinstance(val, (int, float)):
-                            if val == int(val) and 0 < val < 2000:
-                                codigos.append(int(val))
-                            linha_val.append(float(val))
-                            valores.append(float(val))
-                        else:
-                            s = str(val).strip()
-                            if s:
-                                strings.append((0, s))
-                                linha_str.append(s)
-                
-                # Guardar linha com descrição e valores
-                if linha_str and linha_val:
-                    # Última coluna geralmente é o saldo atual
-                    linhas_dados.append({
-                        'descricao': ' '.join(linha_str),
-                        'valores': linha_val,
-                        'saldo': linha_val[-1] if linha_val else 0
-                    })
-            
-            wb.close()
-            
-            # Processar como normal
-            texto = '\n'.join([s[1] for s in strings])
-            
-            cnpj = self._extrair_cnpj(texto)
-            if not cnpj:
-                return ResultadoImportacao(
-                    sucesso=False,
-                    mensagem="CNPJ não encontrado"
-                )
-            
-            nome = self._extrair_nome_empresa(texto)
-            periodo_inicio, periodo_fim = self._extrair_periodo(texto)
-            contador_nome, contador_crc, contador_cpf = self._extrair_contador(texto)
-            
-            empresa = DadosEmpresa(
-                nome=nome or "EMPRESA NÃO IDENTIFICADA",
-                cnpj=cnpj,
-                contador_nome=contador_nome,
-                contador_crc=contador_crc,
-                contador_cpf=contador_cpf
-            )
-            
-            # Usar processamento especial para XLSX com dados de linhas
-            contas, totais, mapeamento, preview = self._processar_contas_xlsx(linhas_dados, valores)
-            
-            socios = self._identificar_socios(strings, valores, totais)
-            empresa.socios = socios
-            clientes = self._identificar_clientes(strings, valores)
-            self._calcular_totais_adicionais(totais)
-            
-            balancete = BalanceteImportado(
-                empresa=empresa,
-                periodo_inicio=periodo_inicio or date.today().replace(day=1),
-                periodo_fim=periodo_fim or date.today(),
-                contas=contas,
-                clientes=clientes,
-                totais=totais,
-                arquivo_origem=nome_arquivo,
-                hash_arquivo=hashlib.md5(conteudo).hexdigest()
-            )
-            
-            return ResultadoImportacao(
-                sucesso=True,
-                mensagem=f"Balancete importado: {empresa.nome}",
-                balancete=balancete,
-                preview_contas=preview,
-                mapeamento=mapeamento
-            )
-            
-        except ImportError:
-            return ResultadoImportacao(
-                sucesso=False,
-                mensagem="Biblioteca openpyxl não disponível"
-            )
-    
-    def _processar_contas_xlsx(self, linhas_dados: List[Dict], valores: List[float]) -> Tuple:
-        """Processa contas de arquivo XLSX com associação linha a linha."""
-        contas = []
-        totais = {}
-        mapeamento = []
-        preview = []
-        
-        for linha in linhas_dados:
-            descricao = linha['descricao']
-            saldo = linha['saldo']
-            
-            # Ignorar linhas de cabeçalho
-            desc_lower = descricao.lower()
-            if any(x in desc_lower for x in ['código', 'descrição', 'saldo anterior', 'débito', 'crédito', 'saldo atual']):
-                continue
-            if 'período' in desc_lower or 'cnpj' in desc_lower:
-                continue
-            if len(descricao) < 3:
-                continue
-            
-            # Buscar mapeamento
-            campo_sistema = None
-            tipo_conta = 'outro'
-            
-            # Limpar descrição para busca
-            desc_busca = re.sub(r'[,.\'\d\-\(\)%]+$', '', desc_lower).strip()
-            desc_busca = re.sub(r'^\d+\s*', '', desc_busca).strip()  # Remover código inicial
-            
-            # Busca exata
-            if desc_busca in MAPEAMENTO_CONTAS:
-                campo_sistema, tipo_conta = MAPEAMENTO_CONTAS[desc_busca]
-            else:
-                # Busca parcial
-                for chave, (campo, tipo) in MAPEAMENTO_CONTAS.items():
-                    if chave in desc_busca or desc_busca in chave:
-                        campo_sistema = campo
-                        tipo_conta = tipo
-                        break
-            
-            # Guardar total se mapeado
-            if campo_sistema and saldo != 0:
-                totais[campo_sistema] = abs(saldo)
-            
-            # Determinar natureza
-            natureza = ''
-            if tipo_conta == 'ativo':
-                natureza = 'D'
-            elif tipo_conta in ['passivo', 'pl']:
-                natureza = 'C'
-            elif tipo_conta == 'receita':
-                natureza = 'C'
-            elif tipo_conta in ['deducao', 'despesa', 'custo']:
-                natureza = 'D'
-            
-            # Criar conta
-            conta = ContaContabil(
-                codigo='',
-                descricao=descricao[:100],
-                saldo_atual=saldo,
-                natureza=natureza,
-                tipo=tipo_conta
-            )
-            contas.append(conta)
-            
-            mapeamento.append({
-                'descricao_original': descricao[:100],
-                'campo_sistema': campo_sistema or 'não mapeado',
-                'tipo': tipo_conta,
-                'valor': saldo,
-                'mapeado': campo_sistema is not None
-            })
-            
-            preview.append({
-                'descricao': descricao[:50],
-                'campo': campo_sistema or '-',
-                'valor': saldo,
-                'natureza': natureza,
-                'tipo': tipo_conta
-            })
-        
-        return contas, totais, mapeamento, preview
     
     def _importar_pdf(self, conteudo: bytes, nome_arquivo: str) -> ResultadoImportacao:
         """Importa PDF."""

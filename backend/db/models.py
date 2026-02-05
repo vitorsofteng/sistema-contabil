@@ -174,6 +174,10 @@ class Empresa(Base, TimestampMixin, SoftDeleteMixin):
     observacoes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     ativo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     
+    # Sistema contábil - salvo como inteiro (enum SistemaContabil)
+    # 0 = Não definido, 1 = Domínio (tem parser), 100+ = outros sistemas (usa IA)
+    sistema_contabil: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    
     # Relacionamentos
     contador: Mapped["Contador"] = relationship("Contador", back_populates="empresas")
     dados_mensais: Mapped[List["DadosMensal"]] = relationship(
@@ -215,6 +219,7 @@ class Empresa(Base, TimestampMixin, SoftDeleteMixin):
             'contato_nome': self.contato_nome,
             'observacoes': self.observacoes,
             'ativo': self.ativo,
+            'sistema_contabil': self.sistema_contabil,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }

@@ -3,7 +3,7 @@ Serviço de Importação de Balancetes
 Sistema Contábil - Sprint 5
 
 Gerencia o fluxo completo de importação:
-1. Recebe arquivo (PDF, XLS, XLSX, CSV)
+1. Recebe arquivo (PDF)
 2. Extrai dados automaticamente
 3. Identifica empresa pelo CNPJ
 4. Cria empresa se necessário
@@ -231,7 +231,7 @@ class ServicoImportacao:
         Importa balancete de arquivo.
         
         Args:
-            caminho: Caminho do arquivo (PDF, XLS, XLSX, CSV)
+            caminho: Caminho do arquivo (PDF)
         
         Returns:
             ResultadoServico com dados completos
@@ -245,10 +245,10 @@ class ServicoImportacao:
         
         # Verificar extensão
         extensao = os.path.splitext(caminho)[1].lower()
-        if extensao not in ['.pdf', '.xls', '.xlsx', '.xlsm', '.csv']:
+        if extensao not in ['.pdf']:
             return ResultadoServico(
                 sucesso=False,
-                mensagem=f"Formato não suportado: {extensao}. Use PDF, XLS, XLSX ou CSV."
+                mensagem=f"Formato não suportado: {extensao}. Use PDF."
             )
         
         # Importar dados
@@ -514,4 +514,4 @@ if __name__ == "__main__":
             print(json.dumps(resultado.dados_completos, indent=2, ensure_ascii=False, default=str))
     else:
         print("Uso: python servico_importacao.py <arquivo>")
-        print("Formatos suportados: PDF, XLS, XLSX, CSV")
+        print("Formatos suportados: PDF")
