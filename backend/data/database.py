@@ -37,7 +37,6 @@ class DatabaseConfig:
     """Configurações do banco de dados."""
     
     ENV = os.environ.get('ENV', 'development')
-    USE_POSTGRES = os.environ.get('USE_POSTGRES', 'false').lower() == 'true'
     
     # PostgreSQL
     POSTGRES_USER = os.environ.get('POSTGRES_USER', 'contabil')
@@ -46,10 +45,16 @@ class DatabaseConfig:
     POSTGRES_PORT = os.environ.get('POSTGRES_PORT', '5432')
     POSTGRES_DB = os.environ.get('POSTGRES_DB', 'contabil_db')
     
-    DATABASE_URL = os.environ.get(
-        'DATABASE_URL',
-        f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
-    )
+    _raw_url = os.environ.get('DATABASE_URL', '')
+    
+    # Railway usa postgres:// mas SQLAlchemy 2.x exige postgresql://
+    if _raw_url.startswith('postgres://'):
+        _raw_url = _raw_url.replace('postgres://', 'postgresql://', 1)
+    
+    DATABASE_URL = _raw_url or f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
+    
+    # Auto-detecta se deve usar PostgreSQL: se DATABASE_URL está definida OU USE_POSTGRES=true
+    USE_POSTGRES = bool(_raw_url) or os.environ.get('USE_POSTGRES', 'false').lower() == 'true'
     
     # SQLite fallback
     SQLITE_PATH = os.environ.get('SQLITE_PATH', 'data/contabil.db')
@@ -378,17 +383,12 @@ def _run_migrations():
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-try:
-    from auth.security import (
-        hash_password, verify_password, validate_password_strength,
-        create_access_token, create_refresh_token, decode_access_token,
-        decode_refresh_token, create_reset_token, AuthConfig
-    )
-    BCRYPT_AVAILABLE = True
-except ImportError:
-    BCRYPT_AVAILABLE = False
-    def hash_password(s): return hashlib.sha256(s.encode()).hexdigest()
-    def verify_password(p, h): return hashlib.sha256(p.encode()).hexdigest() == h
+from auth.security import (
+    hash_password, verify_password, validate_password_strength,
+    create_access_token, create_refresh_token, decode_access_token,
+    decode_refresh_token, create_reset_token, AuthConfig
+)
+BCRYPT_AVAILABLE = True  # Sempre True - dependência obrigatória
 
 
 # =============================================================================

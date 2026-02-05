@@ -126,7 +126,8 @@ except ImportError:
 # ==============================================================================
 
 # Determinar se estamos em produção
-IS_PRODUCTION = os.getenv("ENVIRONMENT", "development").lower() == "production"
+_env = os.getenv("ENVIRONMENT", "development").lower()
+IS_PRODUCTION = _env in ("production", "staging")
 
 # Validar configurações críticas em produção
 if IS_PRODUCTION and SETTINGS_AVAILABLE:
@@ -137,8 +138,8 @@ if IS_PRODUCTION and SETTINGS_AVAILABLE:
         for error in errors:
             print(f"  - {error}")
         print("=" * 60)
-        # Em produção, não iniciar com configuração insegura
-        # sys.exit(1)
+        # Em produção/staging, não iniciar com configuração insegura
+        sys.exit(1)
 
 app = FastAPI(
     title="Sistema de Gestão Contábil", 
@@ -161,15 +162,28 @@ if SECURITY_MIDDLEWARE_AVAILABLE and settings.security_headers_enabled:
     app.add_middleware(SecurityHeadersMiddleware)
 
 # 3. CORS - Configuração restritiva
+# CORS - Monta lista de origens dinamicamente
 cors_origins = settings.cors_origins if SETTINGS_AVAILABLE else [
     "http://localhost",
     "http://localhost:3000", 
     "http://localhost:5173"
 ]
 
+# Adiciona FRONTEND_URL (Railway/deploy) se definido
+_frontend_url = os.getenv("FRONTEND_URL", "")
+if _frontend_url and _frontend_url not in cors_origins:
+    cors_origins.append(_frontend_url)
+    # Também aceita com e sem trailing slash
+    cors_origins.append(_frontend_url.rstrip("/"))
+
+# Adiciona domínios Railway automaticamente
+_railway_public_domain = os.getenv("RAILWAY_PUBLIC_DOMAIN", "")
+if _railway_public_domain:
+    cors_origins.append(f"https://{_railway_public_domain}")
+
 # Em produção, não usar "*"
 if IS_PRODUCTION and "*" in cors_origins:
-    cors_origins = ["https://seudominio.com"]  # Substitua pelo seu domínio
+    cors_origins = [o for o in cors_origins if o != "*"]
 
 app.add_middleware(
     CORSMiddleware,
@@ -178,8 +192,11 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "X-Requested-With"],
     expose_headers=["X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset"],
-    max_age=600,  # Cache preflight por 10 minutos
+    max_age=600,
 )
+
+# Limite de upload: 10MB
+MAX_UPLOAD_SIZE = 10 * 1024 * 1024  # 10MB
 
 csv_importer = SmartCSVImporter()
 analyzer = ContabilAnalyzerPro()
@@ -188,6 +205,13 @@ pdf_generator = PDFGeneratorPro()
 # ==============================================================================
 # FUNÇÕES AUXILIARES DE SEGURANÇA
 # ==============================================================================
+
+import logging
+logger = logging.getLogger("contabil.api")
+
+def _log_error(endpoint: str, error: Exception):
+    """Loga erro internamente sem expor ao cliente."""
+    logger.error(f"[{endpoint}] {type(error).__name__}: {error}")
 
 def _get_client_ip(request: Request) -> str:
     """Obtém IP real do cliente considerando proxies."""
@@ -441,7 +465,7 @@ async def obter_sistema_contabil(codigo: int):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Erro interno do servidor")
 
 
 @app.post("/api/detectar-sistema")
@@ -530,7 +554,11 @@ async def preview_importacao_dominio(file: UploadFile = File(...)):
         
         # Ler conteúdo
         conteudo = await file.read()
-        
+
+        if len(conteudo) > MAX_UPLOAD_SIZE:
+
+            raise HTTPException(status_code=413, detail=f"Arquivo muito grande. Máximo: {MAX_UPLOAD_SIZE // (1024*1024)}MB")
+
         # Processar com parser Domínio
         resultado = parse_dominio(conteudo, file.filename)
         
@@ -860,7 +888,7 @@ async def registrar(dados: ContadorCreate, request: Request):
     except Exception as e:
         if "UNIQUE" in str(e) or "já cadastrado" in str(e):
             raise HTTPException(status_code=400, detail="Email já cadastrado")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Erro interno do servidor")
 
 
 @app.post("/auth/login")
@@ -927,14 +955,9 @@ async def login(dados: LoginRequest, request: Request):
         if rate_limiter:
             rate_limiter.clear_failed_logins(client_ip)
         
-        # Verificar se 2FA está ativo
+        # 2FA desabilitado temporariamente - implementação com bypass
+        # TODO: Reimplementar 2FA sem retornar tokens antes da verificação
         requires_2fa = False
-        if SECURITY_ADVANCED_AVAILABLE and TwoFactorAuth:
-            try:
-                with get_db() as db:
-                    requires_2fa = TwoFactorAuth.is_2fa_enabled(db, result['id'])
-            except:
-                pass
         
         # Registrar login bem-sucedido na auditoria
         if SECURITY_ADVANCED_AVAILABLE and AuditLogger:
@@ -1276,6 +1299,8 @@ class Disable2FARequest(BaseModel):
 
 @app.post("/auth/2fa/setup")
 async def setup_2fa(user: Dict = Depends(get_user)):
+    raise HTTPException(status_code=501, detail="2FA temporariamente desabilitado. Será reimplementado em breve.")
+    # --- Código original abaixo (desabilitado) ---
     """
     Configura autenticação de dois fatores (2FA).
     
@@ -1372,7 +1397,7 @@ async def verify_2fa(dados: Verify2FARequest, request: Request, user: Dict = Dep
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Erro interno do servidor")
 
 
 @app.post("/auth/2fa/disable")
@@ -1407,7 +1432,7 @@ async def disable_2fa(dados: Disable2FARequest, user: Dict = Depends(get_user)):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Erro interno do servidor")
 
 
 @app.get("/auth/2fa/status")
@@ -1452,7 +1477,7 @@ async def use_backup_code(request: Request, user: Dict = Depends(get_user)):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Erro interno do servidor")
 
 
 # ==============================================================================
@@ -1600,7 +1625,7 @@ async def revoke_all_sessions(
                 "sessions_revoked": count
             }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Erro interno do servidor")
 
 
 # === ROTAS DASHBOARD ===
@@ -1921,6 +1946,8 @@ async def upload_csv(id: int, file: UploadFile = File(...), user: Dict = Depends
     
     try:
         content = await file.read()
+        if len(content) > MAX_UPLOAD_SIZE:
+            raise HTTPException(status_code=413, detail=f"Arquivo muito grande. Máximo: {MAX_UPLOAD_SIZE // (1024*1024)}MB")
         try:
             csv_content = content.decode('utf-8')
         except:
@@ -2665,6 +2692,13 @@ async def preview_importacao_route(
         raise HTTPException(status_code=501, detail="Importação avançada não disponível")
     
     conteudo = await file.read()
+
+    
+    if len(conteudo) > MAX_UPLOAD_SIZE:
+
+    
+        raise HTTPException(status_code=413, detail=f"Arquivo muito grande. Máximo: {MAX_UPLOAD_SIZE // (1024*1024)}MB")
+
     
     try:
         resultado = preview_importacao(
@@ -2690,6 +2724,14 @@ async def executar_importacao_route(
         raise HTTPException(status_code=501, detail="Importação avançada não disponível")
     
     conteudo = await file.read()
+
+    
+    if len(conteudo) > MAX_UPLOAD_SIZE:
+
+    
+        raise HTTPException(status_code=413, detail=f"Arquivo muito grande. Máximo: {MAX_UPLOAD_SIZE // (1024*1024)}MB")
+
+    
     mapeamento_dict = json.loads(mapeamento) if mapeamento else None
     
     # Obtém empresa para verificar organização
@@ -2912,7 +2954,11 @@ async def importar_arquivo_com_ia(
     
     # Ler arquivo
     conteudo = await file.read()
-    
+
+    if len(conteudo) > MAX_UPLOAD_SIZE:
+
+        raise HTTPException(status_code=413, detail=f"Arquivo muito grande. Máximo: {MAX_UPLOAD_SIZE // (1024*1024)}MB")
+
     try:
         # Tentar usar roteador inteligente
         try:
@@ -3056,7 +3102,11 @@ async def preview_importacao_ia(
     
     # Ler arquivo
     conteudo = await file.read()
-    
+
+    if len(conteudo) > MAX_UPLOAD_SIZE:
+
+        raise HTTPException(status_code=413, detail=f"Arquivo muito grande. Máximo: {MAX_UPLOAD_SIZE // (1024*1024)}MB")
+
     try:
         # Usa importação inteligente se disponível
         if IMPORTACAO_INTELIGENTE_AVAILABLE:
@@ -3123,7 +3173,11 @@ async def preview_importacao_ia_lote(
     """
     # Ler arquivo
     conteudo = await file.read()
-    
+
+    if len(conteudo) > MAX_UPLOAD_SIZE:
+
+        raise HTTPException(status_code=413, detail=f"Arquivo muito grande. Máximo: {MAX_UPLOAD_SIZE // (1024*1024)}MB")
+
     try:
         # SEMPRE usa IA neste endpoint (usuário escolheu não usar parser local)
         if IMPORTACAO_INTELIGENTE_AVAILABLE:
@@ -4155,7 +4209,7 @@ async def marcar_alerta_lido(alerta_id: int, user: Dict = Depends(get_user)):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Erro interno do servidor")
 
 
 @app.post("/alertas/{alerta_id}/resolver")
@@ -4192,7 +4246,7 @@ async def resolver_alerta(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Erro interno do servidor")
 
 
 @app.post("/alertas/marcar-todos-lidos")
@@ -4223,7 +4277,7 @@ async def marcar_todos_alertas_lidos(
             db.commit()
             return {"ok": True}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Erro interno do servidor")
 
 
 @app.get("/alertas/configuracao")
@@ -4964,7 +5018,7 @@ async def atualizar_setor_empresa(
         
         return {"ok": True, "setor": dados.setor, "porte": dados.porte}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Erro interno do servidor")
 
 
 # Metas financeiras
@@ -5043,7 +5097,7 @@ async def criar_meta_financeira(
             db.commit()
             return {"ok": True}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Erro interno do servidor")
 
 
 @app.get("/empresas/{empresa_id}/metas")
@@ -5298,6 +5352,13 @@ async def importar_balancete_route(
         )
     
     conteudo = await file.read()
+
+    
+    if len(conteudo) > MAX_UPLOAD_SIZE:
+
+    
+        raise HTTPException(status_code=413, detail=f"Arquivo muito grande. Máximo: {MAX_UPLOAD_SIZE // (1024*1024)}MB")
+
     
     try:
         resultado = importar_com_ia(conteudo, file.filename)
@@ -5349,6 +5410,13 @@ async def importar_balancete_e_salvar_route(
         )
     
     conteudo = await file.read()
+
+    
+    if len(conteudo) > MAX_UPLOAD_SIZE:
+
+    
+        raise HTTPException(status_code=413, detail=f"Arquivo muito grande. Máximo: {MAX_UPLOAD_SIZE // (1024*1024)}MB")
+
     
     try:
         resultado = importar_com_ia(conteudo, file.filename, empresa_id)
@@ -5400,7 +5468,11 @@ async def importar_balancetes_lote(
     
     for file in files:
         conteudo = await file.read()
-        
+
+        if len(conteudo) > MAX_UPLOAD_SIZE:
+
+            raise HTTPException(status_code=413, detail=f"Arquivo muito grande. Máximo: {MAX_UPLOAD_SIZE // (1024*1024)}MB")
+
         try:
             resultado = importar_com_ia(conteudo, file.filename)
             
@@ -5586,7 +5658,11 @@ async def preview_importacao_validado(
     
     # Ler arquivo
     conteudo = await file.read()
-    
+
+    if len(conteudo) > MAX_UPLOAD_SIZE:
+
+        raise HTTPException(status_code=413, detail=f"Arquivo muito grande. Máximo: {MAX_UPLOAD_SIZE // (1024*1024)}MB")
+
     try:
         # Usa importação inteligente
         if IMPORTACAO_INTELIGENTE_AVAILABLE:

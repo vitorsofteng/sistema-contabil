@@ -64,10 +64,14 @@ class Settings:
     def is_development(self) -> bool:
         return self.environment.lower() == "development"
     
+    @property
+    def is_staging(self) -> bool:
+        return self.environment.lower() == "staging"
+    
     def validate_production(self) -> List[str]:
-        """Valida configurações críticas para produção."""
+        """Valida configurações críticas para produção e staging."""
         errors = []
-        if self.is_production:
+        if self.is_production or self.is_staging:
             if "DEVELOPMENT" in self.jwt_secret.upper() or "CHANGE" in self.jwt_secret.upper():
                 errors.append("JWT_SECRET deve ser alterado em produção")
             if len(self.jwt_secret) < 32:
