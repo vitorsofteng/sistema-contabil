@@ -45,10 +45,16 @@ services:
       - ENV=development
       - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-production-12345678901234567890}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - RESEND_API_KEY=${RESEND_API_KEY:-}
+      - EMAIL_FROM=${EMAIL_FROM:-Kontabil <onboarding@resend.dev>}
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost}
+      - ENVIRONMENT=${ENVIRONMENT:-development}
     volumes:
       - ./backend/api:/app/api
       - ./backend/engine:/app/engine
       - ./backend/auth:/app/auth
+      - ./backend/core:/app/core
+      - ./backend/data:/app/data
       - ./backend/db:/app/db
       - ./backend/reports:/app/reports
       - ./backend/importers:/app/importers

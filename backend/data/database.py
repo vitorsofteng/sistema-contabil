@@ -144,6 +144,11 @@ class Contador(Base):
     
     ativo = Column(Boolean, default=True)
     
+    # Verificação de email
+    email_verified = Column(Boolean, default=False)
+    email_verification_token = Column(String(500))
+    email_verification_expires = Column(DateTime)
+    
     # Segurança
     password_changed_at = Column(DateTime)
     reset_token = Column(String(500))
@@ -336,7 +341,34 @@ class TokenBlacklist(Base):
 def init_db():
     """Cria todas as tabelas."""
     Base.metadata.create_all(bind=engine)
+    
+    # Migrações incrementais (colunas novas em tabelas existentes)
+    _run_migrations()
+    
     print(f"✓ Banco inicializado: {'PostgreSQL' if DatabaseConfig.USE_POSTGRES else 'SQLite'}")
+
+
+def _run_migrations():
+    """Adiciona colunas novas se não existirem (compatível com SQLite e PostgreSQL)."""
+    migrations = [
+        ("contadores", "email_verified", "BOOLEAN DEFAULT 0"),
+        ("contadores", "email_verification_token", "VARCHAR(500)"),
+        ("contadores", "email_verification_expires", "DATETIME"),
+    ]
+    
+    with get_db() as db:
+        for table, column, col_type in migrations:
+            try:
+                db.execute(text(f"SELECT {column} FROM {table} LIMIT 1"))
+            except Exception:
+                try:
+                    db.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}"))
+                    db.commit()
+                    print(f"  ✓ Migração: {table}.{column} adicionada")
+                except Exception as e:
+                    db.rollback()
+                    # Coluna pode já existir em outra sessão
+                    pass
 
 
 # =============================================================================
@@ -449,6 +481,7 @@ def criar_contador(nome: str, email: str, senha: str, telefone: str = None, crc:
             raise ValueError("Email já cadastrado")
         
         # Cria contador
+        verification_token = secrets.token_urlsafe(48)
         contador = Contador(
             nome=nome,
             email=email,
@@ -457,7 +490,10 @@ def criar_contador(nome: str, email: str, senha: str, telefone: str = None, crc:
             crc=crc,
             escritorio=escritorio,
             cnpj=cnpj,
-            password_changed_at=datetime.now()
+            password_changed_at=datetime.now(),
+            email_verified=False,
+            email_verification_token=verification_token,
+            email_verification_expires=datetime.now() + timedelta(hours=24)
         )
         db.add(contador)
         db.flush()
@@ -500,8 +536,55 @@ def criar_contador(nome: str, email: str, senha: str, telefone: str = None, crc:
             'cnpj': contador.cnpj,
             'token': access_token,
             'refresh_token': refresh_token,
-            'expires_in': 28800
+            'expires_in': 28800,
+            'email_verified': False,
+            'verification_token': verification_token
         }
+
+
+def verificar_email_token(token: str) -> dict:
+    """Verifica email usando token de verificação."""
+    with get_db() as db:
+        contador = db.query(Contador).filter(
+            Contador.email_verification_token == token,
+            Contador.deleted_at.is_(None)
+        ).first()
+        
+        if not contador:
+            raise ValueError("Token de verificação inválido")
+        
+        if contador.email_verified:
+            return {'email': contador.email, 'already_verified': True}
+        
+        if contador.email_verification_expires and contador.email_verification_expires < datetime.now():
+            raise ValueError("Token expirado. Solicite um novo email de verificação.")
+        
+        contador.email_verified = True
+        contador.email_verification_token = None
+        contador.email_verification_expires = None
+        
+        return {'email': contador.email, 'nome': contador.nome, 'already_verified': False}
+
+
+def reenviar_verificacao_email(email: str) -> Optional[str]:
+    """Gera novo token de verificação de email. Retorna token ou None."""
+    with get_db() as db:
+        contador = db.query(Contador).filter(
+            Contador.email == email,
+            Contador.deleted_at.is_(None)
+        ).first()
+        
+        if not contador:
+            return None
+        
+        if contador.email_verified:
+            return None
+        
+        new_token = secrets.token_urlsafe(48)
+        contador.email_verification_token = new_token
+        contador.email_verification_expires = datetime.now() + timedelta(hours=24)
+        
+        return new_token
 
 
 def autenticar_contador(email: str, senha: str, ip: str = None) -> Optional[Dict]:
@@ -567,6 +650,7 @@ def autenticar_contador(email: str, senha: str, ip: str = None) -> Optional[Dict
             'email': contador.email,
             'telefone': contador.telefone,
             'crc': contador.crc,
+            'email_verified': bool(contador.email_verified),
             'token': access_token,
             'refresh_token': refresh_token,
             'expires_in': 28800
@@ -612,7 +696,8 @@ def validar_token(token: str) -> Optional[Dict]:
             'nome': contador.nome,
             'email': contador.email,
             'telefone': contador.telefone,
-            'crc': contador.crc
+            'crc': contador.crc,
+            'email_verified': bool(contador.email_verified)
         }
 
 
