@@ -379,13 +379,223 @@ async def security_status():
     }
 
 
+# === SISTEMAS CONTÁBEIS ===
+
+@app.get("/api/sistemas-contabeis")
+async def listar_sistemas_contabeis(busca: Optional[str] = None):
+    """
+    Lista todos os sistemas contábeis disponíveis para seleção.
+    
+    Query params:
+        busca: Termo para filtrar sistemas por nome/fabricante
+    
+    Returns:
+        Lista de sistemas com id, nome, fabricante, categoria e se tem parser local
+    """
+    try:
+        from importers.sistemas_contabeis import listar_sistemas_para_dropdown, buscar_sistemas
+        
+        if busca:
+            sistemas = buscar_sistemas(busca)
+        else:
+            sistemas = listar_sistemas_para_dropdown()
+        
+        return {
+            "sistemas": sistemas,
+            "total": len(sistemas)
+        }
+    except Exception as e:
+        # Fallback se módulo não disponível
+        return {
+            "sistemas": [
+                {"id": 0, "nome": "Outro / Não sei", "fabricante": "", "tem_parser": False, "label": "Outro / Não sei"},
+                {"id": 1, "nome": "Domínio Sistemas", "fabricante": "Thomson Reuters", "tem_parser": True, "label": "Domínio Sistemas (Thomson Reuters)"},
+            ],
+            "total": 2,
+            "error": str(e)
+        }
+
+
+@app.get("/api/sistemas-contabeis/{codigo}")
+async def obter_sistema_contabil(codigo: int):
+    """
+    Obtém informações de um sistema contábil específico.
+    """
+    try:
+        from importers.sistemas_contabeis import get_sistema_info, sistema_tem_parser
+        
+        info = get_sistema_info(codigo)
+        if not info:
+            raise HTTPException(status_code=404, detail="Sistema não encontrado")
+        
+        return {
+            "id": info.id,
+            "nome": info.nome,
+            "fabricante": info.fabricante,
+            "tem_parser": info.tem_parser,
+            "descricao": info.descricao,
+            "usa_ia": not sistema_tem_parser(codigo)
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/detectar-sistema")
+async def detectar_sistema_contabil(arquivo: UploadFile = File(...)):
+    """
+    Detecta automaticamente qual sistema contábil gerou o arquivo.
+    
+    Analisa padrões no arquivo para identificar o sistema de origem.
+    Retorna o sistema detectado com nível de confiança.
+    """
+    try:
+        from importers.detector import detectar_sistema
+        from importers.sistemas_contabeis import (
+            SistemaContabil, 
+            get_sistema_info, 
+            sistema_tem_parser,
+            listar_sistemas_para_dropdown
+        )
+        
+        # Ler conteúdo do arquivo
+        conteudo = await arquivo.read()
+        
+        # Detectar sistema
+        resultado = detectar_sistema(conteudo, arquivo.filename)
+        
+        # Mapear nome do sistema para código
+        mapa_sistemas = {
+            'dominio': SistemaContabil.DOMINIO,
+            'contmatic': SistemaContabil.CONTMATIC_PHOENIX,
+            'alterdata': SistemaContabil.ALTERDATA,
+            'prosoft': SistemaContabil.PROSOFT,
+            'fortes': SistemaContabil.FORTES,
+            'desconhecido': SistemaContabil.NAO_DEFINIDO,
+        }
+        
+        sistema_codigo = mapa_sistemas.get(resultado.sistema, SistemaContabil.NAO_DEFINIDO)
+        sistema_info = get_sistema_info(sistema_codigo)
+        
+        # Lista de alternativas (outros sistemas populares)
+        alternativas = listar_sistemas_para_dropdown()[:10]  # Top 10
+        
+        return {
+            "detectado": resultado.sistema != 'desconhecido',
+            "sistema": {
+                "codigo": sistema_codigo,
+                "nome": sistema_info.nome if sistema_info else "Outro / Não sei",
+                "fabricante": sistema_info.fabricante if sistema_info else "",
+                "tem_parser": sistema_tem_parser(sistema_codigo),
+            },
+            "confianca": round(resultado.confianca * 100),  # Percentual
+            "indicadores": resultado.indicadores[:3],  # Primeiros 3 indicadores
+            "alternativas": alternativas,
+            "arquivo": arquivo.filename
+        }
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        # Em caso de erro, retorna desconhecido
+        return {
+            "detectado": False,
+            "sistema": {
+                "codigo": 0,
+                "nome": "Outro / Não sei",
+                "fabricante": "",
+                "tem_parser": False,
+            },
+            "confianca": 0,
+            "indicadores": [],
+            "alternativas": [],
+            "arquivo": arquivo.filename,
+            "erro": str(e)
+        }
+
+
+@app.post("/api/importacao/dominio/preview")
+async def preview_importacao_dominio(file: UploadFile = File(...)):
+    """
+    Preview de importação usando parser local do Domínio.
+    
+    Processa balancete PDF do sistema Domínio.
+    Retorna dados extraídos para preview antes de salvar.
+    """
+    try:
+        from importers.parser_dominio import parse_dominio
+        
+        # Ler conteúdo
+        conteudo = await file.read()
+        
+        # Processar com parser Domínio
+        resultado = parse_dominio(conteudo, file.filename)
+        
+        if not resultado.sucesso:
+            return {
+                "sucesso": False,
+                "erro": resultado.erro or "Erro ao processar arquivo",
+                "arquivo": file.filename
+            }
+        
+        # Garantir que temos um nome de empresa
+        nome_empresa = resultado.empresa
+        if not nome_empresa or nome_empresa.lower() == 'empresa':
+            # Fallback: usar CNPJ ou nome do arquivo
+            if resultado.cnpj:
+                nome_empresa = f"Empresa CNPJ {resultado.cnpj}"
+            else:
+                nome_empresa = file.filename.replace('.pdf', '')
+        
+        # Formatar resposta
+        return {
+            "sucesso": True,
+            "balancete": {
+                "empresa": {
+                    "razao_social": nome_empresa,
+                    "cnpj": resultado.cnpj,
+                },
+                "periodo": {
+                    "inicio": f"{resultado.ano}-{str(resultado.mes).zfill(2)}-01",
+                    "fim": f"{resultado.ano}-{str(resultado.mes).zfill(2)}-28",
+                },
+                "dados": resultado.dados,
+            },
+            "empresa": {
+                "razao_social": nome_empresa,
+                "cnpj": resultado.cnpj,
+            },
+            "dados": resultado.dados,
+            "ano": resultado.ano,
+            "mes": resultado.mes,
+            "periodo": resultado.periodo,
+            "contas_processadas": resultado.contas_processadas,
+            "observacoes": resultado.observacoes,
+            "sistema": resultado.sistema or "dominio",
+            "arquivo": file.filename
+        }
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {
+            "sucesso": False,
+            "erro": f"Erro ao processar: {str(e)}",
+            "arquivo": file.filename
+        }
+
+
 # === MODELS ===
 
 class ContadorCreate(BaseModel):
-    nome: str = Field(..., min_length=3)
+    nome: str = Field(..., min_length=3, description="Nome completo do responsável")
     email: EmailStr
     senha: str = Field(..., min_length=8, description="Mínimo 8 caracteres, 1 maiúscula, 1 minúscula, 1 número, 1 especial")
     telefone: Optional[str] = None
+    escritorio: Optional[str] = Field(None, description="Nome do escritório contábil")
+    cnpj: Optional[str] = Field(None, max_length=14, description="CNPJ do escritório (somente números)")
+    crc: Optional[str] = Field(None, description="Registro no CRC")
 
 class LoginRequest(BaseModel):
     email: EmailStr
@@ -415,9 +625,11 @@ class EmpresaCreate(BaseModel):
     estado: Optional[str] = None
     telefone: Optional[str] = None
     email: Optional[str] = None
+    sistema_contabil: int = Field(default=0, ge=0, description="ID do sistema contábil utilizado")
 
 class EmpresaUpdate(EmpresaCreate):
     razao_social: Optional[str] = None
+    sistema_contabil: Optional[int] = None
 
 class DadosMensais(BaseModel):
     ano: int = Field(..., ge=2000, le=2100)
@@ -606,13 +818,22 @@ async def registrar(dados: ContadorCreate, request: Request):
             )
     
     try:
-        result = criar_contador(dados.nome, dados.email, dados.senha, dados.telefone)
+        result = criar_contador(
+            nome=dados.nome, 
+            email=dados.email, 
+            senha=dados.senha, 
+            telefone=dados.telefone,
+            escritorio=dados.escritorio,
+            cnpj=dados.cnpj,
+            crc=dados.crc
+        )
         return {
             "message": "Conta criada com sucesso",
             "user": {
                 "id": result['id'],
                 "nome": result['nome'],
-                "email": result['email']
+                "email": result['email'],
+                "escritorio": result.get('escritorio')
             },
             "token": result['token'],
             "refresh_token": result['refresh_token'],
@@ -1333,21 +1554,52 @@ async def nova_empresa(dados: EmpresaCreate, user: Dict = Depends(get_user)):
     emp_id = criar_empresa(user['id'], dados.model_dump())
     return {"empresa": obter_empresa(emp_id, user['id']), "id": emp_id}
 
-@app.get("/empresas/cnpj/{cnpj}")
+@app.get("/empresas/cnpj/{cnpj:path}")
 async def get_empresa_by_cnpj(cnpj: str, user: Dict = Depends(get_user)):
     """Busca empresa pelo CNPJ."""
     # Limpar CNPJ (remover formatação)
     cnpj_limpo = ''.join(c for c in cnpj if c.isdigit())
     
+    print(f"[DEBUG] Buscando empresa por CNPJ: {cnpj} -> limpo: {cnpj_limpo}")
+    
     # Buscar em todas as empresas do contador
     empresas = listar_empresas(user['id'])
     
+    print(f"[DEBUG] Total de empresas do usuário: {len(empresas)}")
+    
     for emp in empresas:
         emp_cnpj = ''.join(c for c in (emp.get('cnpj') or '') if c.isdigit())
+        print(f"[DEBUG] Comparando: '{emp_cnpj}' == '{cnpj_limpo}' ? {emp_cnpj == cnpj_limpo}")
         if emp_cnpj == cnpj_limpo:
+            print(f"[DEBUG] Empresa encontrada: {emp.get('razao_social')}")
             return emp
     
+    print(f"[DEBUG] Empresa com CNPJ {cnpj_limpo} não encontrada")
     raise HTTPException(status_code=404, detail="Empresa não encontrada")
+
+
+@app.get("/api/buscar-empresa/{cnpj}")
+async def buscar_empresa_por_cnpj(cnpj: str, user: Dict = Depends(get_user)):
+    """Endpoint alternativo para busca por CNPJ (sem conflito de rotas)."""
+    # Limpar CNPJ (remover formatação)
+    cnpj_limpo = ''.join(c for c in cnpj if c.isdigit())
+    
+    print(f"[API] Buscando empresa por CNPJ: {cnpj} -> limpo: {cnpj_limpo}")
+    
+    # Buscar em todas as empresas do contador
+    empresas = listar_empresas(user['id'])
+    
+    print(f"[API] Total de empresas do usuário {user['id']}: {len(empresas)}")
+    
+    for emp in empresas:
+        emp_cnpj = ''.join(c for c in (emp.get('cnpj') or '') if c.isdigit())
+        print(f"[API] Comparando: '{emp_cnpj}' == '{cnpj_limpo}' ? {emp_cnpj == cnpj_limpo}")
+        if emp_cnpj == cnpj_limpo:
+            print(f"[API] ✓ Empresa encontrada: {emp.get('razao_social')} (ID: {emp.get('id')})")
+            return {"encontrada": True, "empresa": emp}
+    
+    print(f"[API] ✗ Empresa com CNPJ {cnpj_limpo} não encontrada")
+    return {"encontrada": False, "empresa": None}
 
 @app.get("/empresas/{id}")
 async def get_empresa_route(id: int, user: Dict = Depends(get_user)):
@@ -1379,16 +1631,28 @@ async def lista_dados(id: int, user: Dict = Depends(get_user)):
     if not obter_empresa(id, user['id']):
         raise HTTPException(status_code=404, detail="Empresa não encontrada")
     dados_raw = listar_dados_mensais(id)
+    print(f"[API] Listando dados para empresa {id}: {len(dados_raw)} registros")
+    if dados_raw:
+        print(f"[API] Primeiro registro raw: {dados_raw[0]}")
+    
     # Transforma para formato do frontend
     dados = []
     for d in dados_raw:
-        receita = d.get('receita', 0) or 0
-        custos = d.get('custos', 0) or 0
-        despesas = d.get('despesas', 0) or 0
-        impostos = d.get('impostos', 0) or 0
-        folha = d.get('folha', 0) or 0
-        lucro = receita - custos - despesas - impostos - folha
-        margem = (lucro / receita * 100) if receita > 0 else 0
+        # Usa receita_bruta se disponível, senão receita
+        receita = d.get('receita_bruta') or d.get('receita') or 0
+        custos = d.get('custos') or d.get('custos_total') or 0
+        despesas = d.get('despesas_operacionais') or d.get('despesas') or 0
+        impostos = d.get('impostos') or d.get('impostos_total') or 0
+        folha = d.get('folha') or 0
+        caixa = d.get('caixa') or d.get('disponivel') or 0
+        lucro_liq = d.get('lucro_liquido') or 0
+        
+        # Calcula lucro se não tiver
+        if not lucro_liq:
+            lucro_liq = receita - custos - despesas - impostos - folha
+        
+        margem = (lucro_liq / receita * 100) if receita > 0 else 0
+        
         dados.append({
             'id': d.get('id'),
             'competencia': f"{d['ano']}-{d['mes']:02d}",
@@ -1397,10 +1661,12 @@ async def lista_dados(id: int, user: Dict = Depends(get_user)):
             'despesas_operacionais': despesas,
             'impostos': impostos,
             'folha_pagamento': folha,
-            'saldo_caixa': d.get('caixa', 0) or 0,
-            'lucro_liquido': lucro,
+            'saldo_caixa': caixa,
+            'lucro_liquido': lucro_liq,
             'margem_liquida': margem
         })
+    
+    print(f"[API] Dados formatados para frontend: {dados}")
     return {"dados": dados}
 
 @app.post("/empresas/{id}/dados")
@@ -1427,18 +1693,23 @@ async def add_dados(id: int, dados: DadosMensaisFrontend, user: Dict = Depends(g
         'impostos': dados.impostos or dados.impostos_total or 0,
         'folha': dados.folha_pagamento or dados.folha or 0,
         'caixa': dados.saldo_caixa or dados.caixa or dados.disponivel or 0,
-        # Campos expandidos
+        # Campos expandidos - Ativo
         'ativo_total': dados.ativo_total,
         'ativo_circulante': dados.ativo_circulante,
         'disponivel': dados.disponivel,
         'bancos': dados.bancos,
         'clientes': dados.clientes,
         'estoques': dados.estoques,
+        # Campos expandidos - Passivo
         'passivo_total': dados.passivo_total,
         'passivo_circulante': dados.passivo_circulante,
         'passivo_nao_circulante': dados.passivo_nao_circulante,
+        'fornecedores': dados.fornecedores,
+        # Patrimônio Líquido
         'patrimonio_liquido': dados.patrimonio_liquido,
         'capital_social': dados.capital_social,
+        'lucros_acumulados': dados.lucros_acumulados,
+        # DRE
         'receita_bruta': dados.receita_bruta,
         'receita_servicos': dados.receita_servicos,
         'deducoes_receita': dados.deducoes_receita,
@@ -1447,6 +1718,7 @@ async def add_dados(id: int, dados: DadosMensaisFrontend, user: Dict = Depends(g
         'despesas_financeiras': dados.despesas_financeiras,
         'receitas_financeiras': dados.receitas_financeiras,
         'lucro_liquido': dados.lucro_liquido,
+        # Impostos
         'iss': dados.iss,
         'pis': dados.pis,
         'cofins': dados.cofins,
@@ -1520,12 +1792,40 @@ async def add_dados(id: int, dados: DadosMensaisFrontend, user: Dict = Depends(g
 async def add_dados_bulk(id: int, dados: DadosBulk, user: Dict = Depends(get_user)):
     if not obter_empresa(id, user['id']):
         raise HTTPException(status_code=404, detail="Empresa não encontrada")
-    for d in dados.dados:
-        dados_dict = d.model_dump()
-        dados_dict['ano'] = d.ano
-        dados_dict['mes'] = d.mes
-        salvar_dados_mensais(id, dados_dict)
-    return {"ok": True, "salvos": len(dados.dados)}
+    
+    # Importa módulo de normalização
+    try:
+        from importers.normalizacao import normalizar_dados_importacao, CAMPOS_ACUMULADOS_DRE
+        
+        # Converte para lista de dicts
+        dados_lista = [d.model_dump() for d in dados.dados]
+        for d, orig in zip(dados_lista, dados.dados):
+            d['ano'] = orig.ano
+            d['mes'] = orig.mes
+        
+        # Normaliza (converte acumulados para mensais se necessário)
+        dados_normalizados, observacoes = normalizar_dados_importacao(dados_lista)
+        
+        if observacoes:
+            print(f"[API] Normalização: {observacoes}")
+        
+        for dados_dict in dados_normalizados:
+            salvar_dados_mensais(id, dados_dict)
+        
+        return {
+            "ok": True, 
+            "salvos": len(dados_normalizados),
+            "observacoes": observacoes
+        }
+    except ImportError:
+        # Fallback se módulo não disponível
+        print("[API] Módulo de normalização não disponível, salvando sem normalização")
+        for d in dados.dados:
+            dados_dict = d.model_dump()
+            dados_dict['ano'] = d.ano
+            dados_dict['mes'] = d.mes
+            salvar_dados_mensais(id, dados_dict)
+        return {"ok": True, "salvos": len(dados.dados)}
 
 @app.delete("/empresas/{id}/dados/{ano}/{mes}")
 async def del_dados(id: int, ano: int, mes: int, user: Dict = Depends(get_user)):
@@ -1633,13 +1933,36 @@ async def executar_analise_route(id: int, user: Dict = Depends(get_user)):
         # Converter dados para formato esperado - usar todos os campos disponíveis
         dados_mensais = []
         for d in dados_db:
+            # CORREÇÃO DEFINITIVA: Calcular impostos corretamente mesmo se ICMS zerado
+            icms_valor = d.get('icms') or d.get('icms_deducao') or 0
+            pis_valor = d.get('pis') or d.get('pis_deducao') or 0
+            cofins_valor = d.get('cofins') or d.get('cofins_deducao') or 0
+            irpj_valor = d.get('irpj') or d.get('irpj_deducao') or 0
+            csll_valor = d.get('csll') or d.get('csll_deducao') or 0
+            iss_valor = d.get('iss') or d.get('iss_deducao') or 0
+            
+            # Soma dos impostos individuais
+            soma_impostos_individuais = icms_valor + pis_valor + cofins_valor + irpj_valor + csll_valor + iss_valor
+            
+            # Campo 'impostos' do banco (calculado pelo parser)
+            impostos_campo = d.get('impostos') or d.get('impostos_total') or d.get('deducoes_receita') or 0
+            
+            # CORREÇÃO: Se ICMS está zerado mas impostos > soma, deduzir ICMS
+            if icms_valor == 0 and impostos_campo > soma_impostos_individuais and soma_impostos_individuais > 0:
+                icms_valor = impostos_campo - soma_impostos_individuais
+                soma_impostos_individuais = impostos_campo
+            
+            # Usar o maior valor disponível
+            impostos_valor = max(soma_impostos_individuais, impostos_campo)
+            
             item = {
                 'competencia': f"{d['ano']}-{d['mes']:02d}",
                 # Campos básicos
                 'receita_bruta': d.get('receita_bruta') or d.get('receita') or 0,
                 'custos_total': d.get('custos_total') or d.get('custos') or 0,
                 'despesas_operacionais': d.get('despesas_operacionais') or d.get('despesas') or 0,
-                'impostos_total': d.get('impostos_total') or d.get('impostos') or 0,
+                'impostos': impostos_valor,  # Campo principal para carga tributária
+                'impostos_total': impostos_valor,  # Compatibilidade
                 'folha_pagamento': d.get('folha') or 0,
                 'disponivel': d.get('disponivel') or d.get('caixa') or 0,
                 'lucro_liquido': d.get('lucro_liquido') or ((d.get('receita') or 0) - (d.get('custos') or 0) - (d.get('despesas') or 0) - (d.get('impostos') or 0)),
@@ -1660,12 +1983,19 @@ async def executar_analise_route(id: int, user: Dict = Depends(get_user)):
                 'deducoes_receita': d.get('deducoes_receita') or 0,
                 'despesas_financeiras': d.get('despesas_financeiras') or 0,
                 'receitas_financeiras': d.get('receitas_financeiras') or 0,
-                # Impostos detalhados
-                'iss_deducao': d.get('iss') or 0,
-                'pis_deducao': d.get('pis') or 0,
-                'cofins_deducao': d.get('cofins') or 0,
-                'irpj_deducao': d.get('irpj') or 0,
-                'csll_deducao': d.get('csll') or 0,
+                # Impostos detalhados - usando valores corrigidos!
+                'icms_deducao': icms_valor,  # Pode ser deduzido de 'impostos'
+                'icms': icms_valor,
+                'iss_deducao': iss_valor,
+                'iss': iss_valor,
+                'pis_deducao': pis_valor,
+                'pis': pis_valor,
+                'cofins_deducao': cofins_valor,
+                'cofins': cofins_valor,
+                'irpj_deducao': irpj_valor,
+                'irpj': irpj_valor,
+                'csll_deducao': csll_valor,
+                'csll': csll_valor,
             }
             dados_mensais.append(item)
         
@@ -2378,6 +2708,394 @@ async def obter_mapeamento_padrao_route(
     
     mapeamento = obter_mapeamento_padrao(tipo_arquivo, empresa_id)
     return {"mapeamento": mapeamento}
+
+
+# === IMPORTAÇÃO COM IA ===
+
+# Tenta importar módulo de importação com IA
+try:
+    from importers.importacao_ia import (
+        importar_com_ia,
+        verificar_configuracao as verificar_config_ia
+    )
+    IMPORTACAO_IA_AVAILABLE = True
+except ImportError as e:
+    print(f"Módulo importação IA não disponível: {e}")
+    IMPORTACAO_IA_AVAILABLE = False
+
+# Tenta importar módulo de importação inteligente (parser local + IA)
+try:
+    from importers.importacao_inteligente import (
+        importar_inteligente,
+        verificar_status as verificar_status_importacao
+    )
+    IMPORTACAO_INTELIGENTE_AVAILABLE = True
+    print("[INIT] Importação inteligente ativada (parser local + IA fallback)")
+except ImportError as e:
+    print(f"Módulo importação inteligente não disponível: {e}")
+    IMPORTACAO_INTELIGENTE_AVAILABLE = False
+
+
+@app.get("/importacao/status")
+async def status_importacao(user: Dict = Depends(get_user)):
+    """Verifica status completo da importação (parsers locais + IA)."""
+    if IMPORTACAO_INTELIGENTE_AVAILABLE:
+        status = verificar_status_importacao()
+        return {
+            "disponivel": True,
+            "parsers_locais": status.get('parsers_locais', []),
+            "ia_disponivel": status.get('ia_disponivel', False),
+            "ia_configurada": status.get('ia_configurada', False),
+            "ia_modelo": status.get('ia_modelo', ''),
+            "mensagem": "Sistema de importação inteligente ativo"
+        }
+    elif IMPORTACAO_IA_AVAILABLE:
+        config = verificar_config_ia()
+        return {
+            "disponivel": True,
+            "parsers_locais": [],
+            "ia_disponivel": True,
+            "ia_configurada": config["configurado"],
+            "ia_modelo": config["modelo"],
+            "mensagem": "Apenas IA disponível (sem parsers locais)"
+        }
+    else:
+        return {
+            "disponivel": False,
+            "parsers_locais": [],
+            "ia_disponivel": False,
+            "ia_configurada": False,
+            "mensagem": "Nenhum módulo de importação disponível"
+        }
+
+
+@app.get("/importacao/ia/status")
+async def status_importacao_ia(user: Dict = Depends(get_user)):
+    """Verifica se a importação com IA está disponível e configurada."""
+    if not IMPORTACAO_IA_AVAILABLE:
+        return {
+            "disponivel": False,
+            "configurado": False,
+            "mensagem": "Módulo de importação com IA não disponível"
+        }
+    
+    config = verificar_config_ia()
+    return {
+        "disponivel": True,
+        "configurado": config["configurado"],
+        "modelo": config["modelo"],
+        "mensagem": config["mensagem"]
+    }
+
+
+@app.post("/empresas/{empresa_id}/importar/ia")
+async def importar_arquivo_com_ia(
+    empresa_id: int,
+    file: UploadFile = File(...),
+    substituir_existentes: bool = Form(False),
+    forcar_ia: bool = Form(False),
+    user: Dict = Depends(get_user)
+):
+    """
+    Importa arquivo contábil de forma inteligente.
+    
+    Fluxo:
+    1. Verifica sistema_contabil cadastrado na empresa
+    2. Se tem parser local → usa parser (grátis, instantâneo)
+    3. Se não tem parser → usa IA Claude (fallback)
+    
+    Args:
+        forcar_ia: Se True, pula parser local e usa IA direto
+    """
+    print(f"[API] === INICIANDO IMPORTAÇÃO ===")
+    print(f"[API] empresa_id={empresa_id}, arquivo={file.filename}, substituir={substituir_existentes}, forcar_ia={forcar_ia}")
+    
+    # Verificar empresa
+    empresa = obter_empresa(empresa_id, user['id'])
+    if not empresa:
+        raise HTTPException(status_code=404, detail="Empresa não encontrada")
+    
+    # Obter sistema contábil da empresa
+    sistema_contabil = empresa.get('sistema_contabil', 0)
+    print(f"[API] Sistema contábil cadastrado: {sistema_contabil}")
+    
+    # Obter nome do sistema para log
+    try:
+        from importers.sistemas_contabeis import get_sistema_info, sistema_tem_parser
+        info = get_sistema_info(sistema_contabil)
+        nome_sistema = info.nome if info else "Desconhecido"
+        possui_parser = sistema_tem_parser(sistema_contabil)
+        print(f"[API] Sistema: {nome_sistema}, Tem parser: {possui_parser}")
+    except:
+        nome_sistema = "Desconhecido"
+        possui_parser = sistema_contabil == 1  # Só Domínio
+    
+    # Ler arquivo
+    conteudo = await file.read()
+    
+    try:
+        # Tentar usar roteador inteligente
+        try:
+            from importers.roteador_importacao import importar_balancete_inteligente
+            
+            resultado_roteado = importar_balancete_inteligente(
+                conteudo=conteudo,
+                nome_arquivo=file.filename,
+                sistema_contabil=sistema_contabil,
+                forcar_ia=forcar_ia,
+                fallback_ia=True
+            )
+            
+            if resultado_roteado.get('sucesso'):
+                # Converter para formato esperado
+                class ResultadoWrapper:
+                    def __init__(self, dados):
+                        self.sucesso = dados.get('sucesso', False)
+                        self.dados = dados.get('dados', {})
+                        self.empresa = dados.get('empresa')
+                        self.cnpj = dados.get('cnpj')
+                        self.periodo = dados.get('periodo')
+                        self.ano = dados.get('ano')
+                        self.mes = dados.get('mes')
+                        self.erro = dados.get('erro')
+                        self.sistema_detectado = nome_sistema
+                        self.metodo_usado = dados.get('metodo', 'parser_local')
+                        self.campos_extraidos = dados.get('contas_processadas', len(self.dados))
+                        self.confianca = 0.95 if dados.get('metodo') == 'parser_local' else 0.85
+                        self.custo_estimado = 0.0 if dados.get('metodo') == 'parser_local' else 0.02
+                        self.tokens_usados = 0 if dados.get('metodo') == 'parser_local' else 500
+                        self.observacoes = dados.get('observacoes', [])
+                        roteamento = dados.get('roteamento', {})
+                        self.observacoes.append(f"Método: {roteamento.get('motivo', self.metodo_usado)}")
+                
+                resultado = ResultadoWrapper(resultado_roteado)
+            else:
+                # Roteador falhou, tenta métodos antigos
+                raise Exception(resultado_roteado.get('erro', 'Roteador falhou'))
+                
+        except ImportError:
+            # Roteador não disponível, usa método antigo
+            print("[API] Roteador não disponível, usando método legado")
+            
+            # Usa importação inteligente se disponível
+            if IMPORTACAO_INTELIGENTE_AVAILABLE:
+                resultado = importar_inteligente(conteudo, file.filename, empresa_id, forcar_ia)
+            elif IMPORTACAO_IA_AVAILABLE:
+                # Fallback para IA direta
+                config = verificar_config_ia()
+                if not config["configurado"]:
+                    raise HTTPException(
+                        status_code=503, 
+                        detail="API de IA não configurada. Defina ANTHROPIC_API_KEY."
+                    )
+                resultado = importar_com_ia(conteudo, file.filename, empresa_id)
+            else:
+                raise HTTPException(status_code=501, detail="Nenhum módulo de importação disponível")
+        
+        if not resultado.sucesso:
+            return {
+                "sucesso": False,
+                "erro": resultado.erro,
+                "observacoes": getattr(resultado, 'observacoes', [])
+            }
+        
+        # Verificar conflito de período
+        if resultado.ano and resultado.mes:
+            dados_existentes = listar_dados_mensais(empresa_id, limite=999)
+            periodo_existe = any(
+                d['ano'] == resultado.ano and d['mes'] == resultado.mes 
+                for d in dados_existentes
+            )
+            
+            if periodo_existe and not substituir_existentes:
+                return {
+                    "sucesso": False,
+                    "etapa": "conflito",
+                    "dados_preview": resultado.dados,
+                    "periodo": f"{resultado.mes:02d}/{resultado.ano}",
+                    "empresa_arquivo": resultado.empresa,
+                    "cnpj_arquivo": resultado.cnpj,
+                    "sistema_detectado": resultado.sistema_detectado,
+                    "metodo_usado": getattr(resultado, 'metodo_usado', 'ia'),
+                    "campos_extraidos": resultado.campos_extraidos,
+                    "confianca": resultado.confianca,
+                    "custo_estimado": resultado.custo_estimado,
+                    "tokens_usados": getattr(resultado, 'tokens_usados', 0),
+                    "requer_acao": "confirmar_substituicao",
+                    "mensagem": f"Já existem dados para {resultado.mes:02d}/{resultado.ano}. Deseja substituir?"
+                }
+        
+        # Salvar dados
+        dados_salvar = resultado.dados.copy()
+        if resultado.ano:
+            dados_salvar['ano'] = resultado.ano
+        if resultado.mes:
+            dados_salvar['mes'] = resultado.mes
+        
+        print(f"[API] Salvando dados para empresa {empresa_id}")
+        print(f"[API] Método usado: {getattr(resultado, 'metodo_usado', 'ia')}")
+        print(f"[API] Dados: {dados_salvar}")
+        salvar_dados_mensais(empresa_id, dados_salvar)
+        print(f"[API] Dados salvos com sucesso!")
+        
+        return {
+            "sucesso": True,
+            "dados": resultado.dados,
+            "empresa_arquivo": resultado.empresa,
+            "cnpj_arquivo": resultado.cnpj,
+            "periodo": resultado.periodo,
+            "sistema_detectado": resultado.sistema_detectado,
+            "metodo_usado": getattr(resultado, 'metodo_usado', 'ia'),
+            "campos_extraidos": resultado.campos_extraidos,
+            "confianca": resultado.confianca,
+            "observacoes": getattr(resultado, 'observacoes', []),
+            "custo_estimado": resultado.custo_estimado,
+            "tokens_usados": getattr(resultado, 'tokens_usados', 0),
+            "mensagem": f"Dados importados com sucesso para {resultado.mes:02d}/{resultado.ano}" if resultado.ano else "Dados importados com sucesso"
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Erro na importação: {str(e)}")
+
+
+@app.post("/empresas/{empresa_id}/importar/ia/preview")
+async def preview_importacao_ia(
+    empresa_id: int,
+    file: UploadFile = File(...),
+    forcar_ia: bool = Form(False),
+    user: Dict = Depends(get_user)
+):
+    """
+    Faz preview da importação sem salvar.
+    Usa parser local se sistema reconhecido, IA como fallback.
+    """
+    # Verificar empresa
+    empresa = obter_empresa(empresa_id, user['id'])
+    if not empresa:
+        raise HTTPException(status_code=404, detail="Empresa não encontrada")
+    
+    # Ler arquivo
+    conteudo = await file.read()
+    
+    try:
+        # Usa importação inteligente se disponível
+        if IMPORTACAO_INTELIGENTE_AVAILABLE:
+            resultado = importar_inteligente(conteudo, file.filename, empresa_id, forcar_ia)
+        elif IMPORTACAO_IA_AVAILABLE:
+            config = verificar_config_ia()
+            if not config["configurado"]:
+                raise HTTPException(
+                    status_code=503, 
+                    detail="API de IA não configurada. Defina ANTHROPIC_API_KEY."
+                )
+            resultado = importar_com_ia(conteudo, file.filename, empresa_id)
+        else:
+            raise HTTPException(status_code=501, detail="Nenhum módulo de importação disponível")
+        
+        if not resultado.sucesso:
+            return {
+                "sucesso": False,
+                "erro": resultado.erro,
+                "observacoes": getattr(resultado, 'observacoes', [])
+            }
+        
+        # Verificar se período já existe
+        periodo_existe = False
+        if resultado.ano and resultado.mes:
+            dados_existentes = listar_dados_mensais(empresa_id, limite=999)
+            periodo_existe = any(
+                d['ano'] == resultado.ano and d['mes'] == resultado.mes 
+                for d in dados_existentes
+            )
+        
+        return {
+            "sucesso": True,
+            "dados": resultado.dados,
+            "empresa_arquivo": resultado.empresa,
+            "cnpj_arquivo": resultado.cnpj,
+            "periodo": resultado.periodo,
+            "ano": resultado.ano,
+            "mes": resultado.mes,
+            "sistema_detectado": resultado.sistema_detectado,
+            "metodo_usado": getattr(resultado, 'metodo_usado', 'ia'),
+            "campos_extraidos": resultado.campos_extraidos,
+            "confianca": resultado.confianca,
+            "observacoes": getattr(resultado, 'observacoes', []),
+            "custo_estimado": resultado.custo_estimado,
+            "tokens_usados": getattr(resultado, 'tokens_usados', 0),
+            "periodo_existe": periodo_existe
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Erro na importação: {str(e)}")
+
+
+@app.post("/api/importacao/ia/preview-lote")
+@app.post("/importacao/ia/preview-lote")  # Manter compatibilidade
+async def preview_importacao_ia_lote(
+    file: UploadFile = File(...),
+    user: Dict = Depends(get_user)
+):
+    """
+    Faz preview de um arquivo para importação em lote.
+    SEMPRE usa IA - este endpoint é para quando o usuário quer forçar IA.
+    Não requer empresa - retorna dados para o usuário decidir.
+    """
+    # Ler arquivo
+    conteudo = await file.read()
+    
+    try:
+        # SEMPRE usa IA neste endpoint (usuário escolheu não usar parser local)
+        if IMPORTACAO_INTELIGENTE_AVAILABLE:
+            # Força uso de IA, ignorando detecção automática
+            resultado = importar_inteligente(conteudo, file.filename, forcar_ia=True)
+        elif IMPORTACAO_IA_AVAILABLE:
+            config = verificar_config_ia()
+            if not config["configurado"]:
+                raise HTTPException(
+                    status_code=503, 
+                    detail="API de IA não configurada. Defina ANTHROPIC_API_KEY."
+                )
+            resultado = importar_com_ia(conteudo, file.filename)
+        else:
+            raise HTTPException(status_code=501, detail="Nenhum módulo de importação disponível")
+        
+        if not resultado.sucesso:
+            return {
+                "sucesso": False,
+                "mensagem": resultado.erro,
+                "observacoes": getattr(resultado, 'observacoes', [])
+            }
+        
+        return {
+            "sucesso": True,
+            "balancete": {
+                "dados": resultado.dados,
+                "empresa": {
+                    "nome": resultado.empresa,
+                    "cnpj": resultado.cnpj
+                },
+                "periodo": {
+                    "fim": f"{resultado.ano}-{resultado.mes:02d}-01" if resultado.ano and resultado.mes else None
+                },
+                "sistema_detectado": resultado.sistema_detectado,
+                "metodo_usado": getattr(resultado, 'metodo_usado', 'ia'),
+                "confianca": resultado.confianca
+            },
+            "empresa": {
+                "nome": resultado.empresa,
+                "cnpj": resultado.cnpj
+            },
+            "metodo_usado": getattr(resultado, 'metodo_usado', 'ia'),
+            "custo_estimado": resultado.custo_estimado,
+            "tokens_usados": getattr(resultado, 'tokens_usados', 0)
+        }
+        
+    except Exception as e:
+        return {
+            "sucesso": False,
+            "mensagem": str(e)
+        }
 
 
 # === RELATÓRIOS PRO (F09) ===
@@ -4458,15 +5176,8 @@ async def create_extra_tables():
 
 
 # ============================================================================
-# IMPORTAÇÃO DE BALANCETES (PDF/XLS)
+# IMPORTAÇÃO DE BALANCETES (100% IA)
 # ============================================================================
-
-# Importa módulo de balancetes
-try:
-    from importers import importar_balancete, importar_balancete_e_salvar, BALANCETE_IMPORTER_AVAILABLE
-except ImportError:
-    BALANCETE_IMPORTER_AVAILABLE = False
-
 
 @app.post("/importar/balancete")
 async def importar_balancete_route(
@@ -4474,7 +5185,7 @@ async def importar_balancete_route(
     user: Dict = Depends(get_user)
 ):
     """
-    Importa balancete de arquivo PDF ou XLS.
+    Importa balancete de arquivo PDF usando IA.
     
     Extrai automaticamente todos os dados financeiros:
     - Empresa (nome, CNPJ)
@@ -4483,28 +5194,61 @@ async def importar_balancete_route(
     - DRE
     - Impostos
     - Indicadores
-    
-    A empresa é identificada automaticamente pelo CNPJ.
     """
-    if not BALANCETE_IMPORTER_AVAILABLE:
+    if not IMPORTACAO_IA_AVAILABLE:
         raise HTTPException(
             status_code=501, 
-            detail="Importador de balancetes não disponível"
+            detail="Importação com IA não disponível. Configure ANTHROPIC_API_KEY."
         )
     
-    # Validar extensão
+    # Verificar configuração
+    config = verificar_config_ia()
+    if not config["configurado"]:
+        raise HTTPException(
+            status_code=503, 
+            detail="API de IA não configurada. Defina ANTHROPIC_API_KEY."
+        )
+    
+    # Validar extensão - apenas PDF
     extensao = os.path.splitext(file.filename)[1].lower()
-    if extensao not in ['.pdf', '.xls', '.xlsx', '.xlsm', '.csv']:
+    if extensao not in ['.pdf']:
         raise HTTPException(
             status_code=400,
-            detail=f"Formato não suportado: {extensao}. Use PDF, XLS, XLSX ou CSV."
+            detail=f"Formato não suportado: {extensao}. Use apenas PDF."
         )
     
     conteudo = await file.read()
     
     try:
-        resultado = importar_balancete(conteudo, file.filename)
-        return resultado
+        resultado = importar_com_ia(conteudo, file.filename)
+        
+        if not resultado.sucesso:
+            return {
+                "sucesso": False,
+                "mensagem": resultado.erro,
+                "observacoes": resultado.observacoes
+            }
+        
+        return {
+            "sucesso": True,
+            "balancete": {
+                "dados": resultado.dados,
+                "empresa": {
+                    "nome": resultado.empresa,
+                    "cnpj": resultado.cnpj
+                },
+                "periodo": {
+                    "fim": f"{resultado.ano}-{resultado.mes:02d}-01" if resultado.ano and resultado.mes else None
+                }
+            },
+            "empresa": {
+                "nome": resultado.empresa,
+                "cnpj": resultado.cnpj
+            },
+            "sistema_detectado": resultado.sistema_detectado,
+            "confianca": resultado.confianca,
+            "custo_estimado": resultado.custo_estimado
+        }
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -4516,26 +5260,43 @@ async def importar_balancete_e_salvar_route(
     user: Dict = Depends(get_user)
 ):
     """
-    Importa balancete e salva os dados no sistema.
-    
-    Se empresa_id não for informado, busca ou cria a empresa pelo CNPJ.
+    Importa balancete usando IA e salva os dados no sistema.
     """
-    if not BALANCETE_IMPORTER_AVAILABLE:
+    if not IMPORTACAO_IA_AVAILABLE:
         raise HTTPException(
             status_code=501,
-            detail="Importador de balancetes não disponível"
+            detail="Importação com IA não disponível"
         )
     
     conteudo = await file.read()
     
     try:
-        resultado = importar_balancete_e_salvar(
-            conteudo=conteudo,
-            nome_arquivo=file.filename,
-            contador_id=user['id'],
-            empresa_id=empresa_id
-        )
-        return resultado
+        resultado = importar_com_ia(conteudo, file.filename, empresa_id)
+        
+        if not resultado.sucesso:
+            return {
+                "sucesso": False,
+                "mensagem": resultado.erro
+            }
+        
+        # Se tem empresa_id, salvar
+        if empresa_id:
+            dados_salvar = resultado.dados.copy()
+            if resultado.ano:
+                dados_salvar['ano'] = resultado.ano
+            if resultado.mes:
+                dados_salvar['mes'] = resultado.mes
+            
+            salvar_dados_mensais(empresa_id, dados_salvar)
+        
+        return {
+            "sucesso": True,
+            "dados": resultado.dados,
+            "empresa": resultado.empresa,
+            "cnpj": resultado.cnpj,
+            "periodo": resultado.periodo,
+            "mensagem": "Dados importados com sucesso"
+        }
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -4546,57 +5307,59 @@ async def importar_balancetes_lote(
     user: Dict = Depends(get_user)
 ):
     """
-    Importa múltiplos balancetes de uma vez.
-    
-    Cada arquivo representa um período/mês diferente.
-    A empresa é identificada automaticamente pelo CNPJ.
+    Importa múltiplos balancetes usando IA.
     """
-    if not BALANCETE_IMPORTER_AVAILABLE:
+    if not IMPORTACAO_IA_AVAILABLE:
         raise HTTPException(
             status_code=501,
-            detail="Importador de balancetes não disponível"
+            detail="Importação com IA não disponível"
         )
     
-    try:
-        from engine.importacao_lote import processar_importacao_lote
+    resultados = []
+    custo_total = 0.0
+    
+    for file in files:
+        conteudo = await file.read()
         
-        # Preparar arquivos
-        arquivos = []
-        for file in files:
-            conteudo = await file.read()
-            arquivos.append((conteudo, file.filename))
-        
-        # Processar em lote
-        resultado = processar_importacao_lote(arquivos, user['id'])
-        return resultado
-        
-    except ImportError:
-        # Fallback: processar sequencialmente
-        resultados = []
-        for file in files:
-            conteudo = await file.read()
-            try:
-                res = importar_balancete(conteudo, file.filename)
+        try:
+            resultado = importar_com_ia(conteudo, file.filename)
+            
+            if resultado.sucesso:
                 resultados.append({
-                    'nome': file.filename,
-                    'sucesso': res.get('sucesso', False),
-                    'dados': res
+                    "arquivo": file.filename,
+                    "sucesso": True,
+                    "nome": file.filename,
+                    "empresa": resultado.empresa,
+                    "cnpj": resultado.cnpj,
+                    "periodo": resultado.periodo,
+                    "dados": resultado.dados
                 })
-            except Exception as e:
+                custo_total += resultado.custo_estimado
+            else:
                 resultados.append({
-                    'nome': file.filename,
-                    'sucesso': False,
-                    'erro': str(e)
+                    "arquivo": file.filename,
+                    "nome": file.filename,
+                    "sucesso": False,
+                    "erro": resultado.erro
                 })
-        
-        return {
-            'total_arquivos': len(files),
-            'processados_sucesso': len([r for r in resultados if r['sucesso']]),
-            'processados_erro': len([r for r in resultados if not r['sucesso']]),
-            'arquivos': resultados
-        }
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        except Exception as e:
+            resultados.append({
+                "arquivo": file.filename,
+                "nome": file.filename,
+                "sucesso": False,
+                "erro": str(e)
+            })
+    
+    sucessos = len([r for r in resultados if r.get("sucesso")])
+    
+    return {
+        "sucesso": True,
+        "total_arquivos": len(files),
+        "processados_sucesso": sucessos,
+        "processados_erro": len(files) - sucessos,
+        "arquivos": resultados,
+        "custo_total_estimado": round(custo_total, 4)
+    }
 
 
 # Importar calculadora de indicadores
@@ -4702,6 +5465,258 @@ async def obter_insights_empresa(
         'insights': [],
         'score': 50
     }
+
+
+# ==============================================================================
+# IMPORTAÇÃO COM VALIDAÇÃO E REVISÃO
+# ==============================================================================
+
+# Importar módulo de validação
+try:
+    from importers.validacao_importacao import validar_importacao, ValidadorImportacao
+    VALIDACAO_AVAILABLE = True
+except ImportError:
+    VALIDACAO_AVAILABLE = False
+    validar_importacao = None
+
+
+@app.post("/empresas/{empresa_id}/importar/preview-validado")
+async def preview_importacao_validado(
+    empresa_id: int,
+    file: UploadFile = File(...),
+    forcar_ia: bool = Form(False),
+    user: Dict = Depends(get_user)
+):
+    """
+    Faz preview da importação COM VALIDAÇÃO para revisão pelo usuário.
+    
+    Retorna:
+    - Dados extraídos
+    - Nível de confiança
+    - Alertas e validações
+    - Campos editáveis agrupados
+    - Indicadores calculados
+    
+    O usuário pode revisar e editar os valores antes de confirmar.
+    """
+    # Verificar empresa
+    empresa = obter_empresa(empresa_id, user['id'])
+    if not empresa:
+        raise HTTPException(status_code=404, detail="Empresa não encontrada")
+    
+    # Ler arquivo
+    conteudo = await file.read()
+    
+    try:
+        # Usa importação inteligente
+        if IMPORTACAO_INTELIGENTE_AVAILABLE:
+            resultado = importar_inteligente(conteudo, file.filename, empresa_id, forcar_ia)
+        elif IMPORTACAO_IA_AVAILABLE:
+            config = verificar_config_ia()
+            if not config["configurado"]:
+                raise HTTPException(
+                    status_code=503, 
+                    detail="API de IA não configurada. Defina ANTHROPIC_API_KEY."
+                )
+            resultado = importar_com_ia(conteudo, file.filename, empresa_id)
+        else:
+            raise HTTPException(status_code=501, detail="Nenhum módulo de importação disponível")
+        
+        if not resultado.sucesso:
+            return {
+                "sucesso": False,
+                "erro": resultado.erro,
+                "observacoes": getattr(resultado, 'observacoes', [])
+            }
+        
+        # Determinar método usado
+        metodo = getattr(resultado, 'metodo_usado', 'desconhecido')
+        if 'parser' in metodo.lower() or resultado.sistema_detectado:
+            metodo_display = f"parser_{resultado.sistema_detectado or 'local'}"
+        else:
+            metodo_display = "ia_claude"
+        
+        # Validar dados extraídos
+        if VALIDACAO_AVAILABLE:
+            validacao = validar_importacao(resultado.dados, metodo_display)
+        else:
+            # Validação básica se módulo não disponível
+            validacao = {
+                'confianca': 'media',
+                'confianca_percentual': 75,
+                'metodo_extracao': metodo_display,
+                'alertas': [],
+                'dados_validados': resultado.dados,
+                'campos_editaveis': [],
+                'resumo': 'Validação detalhada não disponível'
+            }
+        
+        # Verificar se período já existe
+        periodo_existe = False
+        if resultado.ano and resultado.mes:
+            dados_existentes = listar_dados_mensais(empresa_id, limite=999)
+            periodo_existe = any(
+                d['ano'] == resultado.ano and d['mes'] == resultado.mes 
+                for d in dados_existentes
+            )
+        
+        # Calcular indicadores preview
+        dados = resultado.dados
+        receita = float(dados.get('receita_bruta', 0) or 0)
+        lucro = float(dados.get('lucro_liquido', 0) or 0)
+        pl = float(dados.get('patrimonio_liquido', 0) or 0)
+        at = float(dados.get('ativo_total', 0) or 0)
+        ac = float(dados.get('ativo_circulante', 0) or 0)
+        pc = float(dados.get('passivo_circulante', 0) or 0)
+        impostos = float(dados.get('impostos', 0) or dados.get('deducoes_receita', 0) or 0)
+        
+        # Validação: usar ativo_circulante se ativo_total está incorreto
+        if ac > at and ac > 0:
+            at = ac
+        if at == 0 and ac > 0:
+            at = ac
+        
+        indicadores_preview = {
+            'margem_liquida': round((lucro / receita) * 100, 2) if receita > 0 else 0,
+            'roe': round((lucro / pl) * 100, 2) if pl > 0 else 0,
+            'roa': round((lucro / at) * 100, 2) if at > 0 else 0,  # ADICIONADO
+            'liquidez_corrente': round(ac / pc, 2) if pc > 0 else 0,
+            'carga_tributaria': round((impostos / receita) * 100, 2) if receita > 0 else 0,
+        }
+        
+        return {
+            "sucesso": True,
+            
+            # Dados da empresa/arquivo
+            "empresa_arquivo": resultado.empresa,
+            "cnpj_arquivo": resultado.cnpj,
+            "empresa_cadastrada": empresa.get('nome'),
+            
+            # Período
+            "periodo": resultado.periodo,
+            "ano": resultado.ano,
+            "mes": resultado.mes,
+            "periodo_existe": periodo_existe,
+            
+            # Sistema e método
+            "sistema_detectado": resultado.sistema_detectado,
+            "metodo_usado": metodo_display,
+            
+            # Validação completa
+            "validacao": validacao,
+            
+            # Indicadores calculados
+            "indicadores_preview": indicadores_preview,
+            
+            # Custos (se IA)
+            "custo_estimado": resultado.custo_estimado,
+            "tokens_usados": getattr(resultado, 'tokens_usados', 0),
+            
+            # Observações
+            "observacoes": getattr(resultado, 'observacoes', [])
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Erro na importação: {str(e)}")
+
+
+@app.post("/empresas/{empresa_id}/importar/confirmar-revisao")
+async def confirmar_importacao_revisada(
+    empresa_id: int,
+    dados_revisados: Dict[str, Any],
+    ano: int,
+    mes: int,
+    user: Dict = Depends(get_user)
+):
+    """
+    Confirma e salva os dados revisados pelo usuário.
+    
+    Recebe os dados após revisão/edição e salva no banco.
+    """
+    # Verificar empresa
+    empresa = obter_empresa(empresa_id, user['id'])
+    if not empresa:
+        raise HTTPException(status_code=404, detail="Empresa não encontrada")
+    
+    try:
+        # Preparar dados para salvar
+        dados_financeiros = {
+            'ano': ano,
+            'mes': mes,
+            'competencia': f"{ano}-{mes:02d}",
+            
+            # DRE
+            'receita_bruta': float(dados_revisados.get('receita_bruta', 0) or 0),
+            'receita_servicos': float(dados_revisados.get('receita_servicos', 0) or 0),
+            'deducoes_receita': float(dados_revisados.get('deducoes_receita', 0) or 0),
+            'custos': float(dados_revisados.get('custos', 0) or 0),
+            'despesas_operacionais': float(dados_revisados.get('despesas_operacionais', 0) or 0),
+            'despesas_financeiras': float(dados_revisados.get('despesas_financeiras', 0) or 0),
+            'lucro_liquido': float(dados_revisados.get('lucro_liquido', 0) or 0),
+            
+            # Ativo
+            'ativo_total': float(dados_revisados.get('ativo_total', 0) or 0),
+            'ativo_circulante': float(dados_revisados.get('ativo_circulante', 0) or 0),
+            'disponivel': float(dados_revisados.get('disponivel', 0) or 0),
+            'caixa': float(dados_revisados.get('caixa', 0) or 0),
+            'bancos': float(dados_revisados.get('bancos', 0) or 0),
+            'clientes': float(dados_revisados.get('clientes', 0) or 0),
+            'estoques': float(dados_revisados.get('estoques', 0) or 0),
+            
+            # Passivo
+            'passivo_circulante': float(dados_revisados.get('passivo_circulante', 0) or 0),
+            'passivo_nao_circulante': float(dados_revisados.get('passivo_nao_circulante', 0) or 0),
+            'fornecedores': float(dados_revisados.get('fornecedores', 0) or 0),
+            
+            # PL
+            'patrimonio_liquido': float(dados_revisados.get('patrimonio_liquido', 0) or 0),
+            'capital_social': float(dados_revisados.get('capital_social', 0) or 0),
+            
+            # Impostos
+            'impostos': float(dados_revisados.get('impostos', 0) or 0),
+            
+            # Metadados
+            'observacoes': 'Revisado pelo usuário'
+        }
+        
+        # salvar_dados_mensais já faz upsert (insert ou update)
+        resultado = salvar_dados_mensais(empresa_id, dados_financeiros)
+        
+        return {
+            "sucesso": True,
+            "mensagem": "Dados salvos com sucesso",
+            "periodo": f"{mes:02d}/{ano}",
+            "empresa_id": empresa_id,
+            "id": resultado
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Erro ao salvar dados: {str(e)}")
+
+
+class DadosRevisadosRequest(BaseModel):
+    """Request para confirmar dados revisados"""
+    dados: Dict[str, Any]
+    ano: int
+    mes: int
+
+
+@app.post("/empresas/{empresa_id}/importar/confirmar")
+async def confirmar_importacao_v2(
+    empresa_id: int,
+    request: DadosRevisadosRequest,
+    user: Dict = Depends(get_user)
+):
+    """
+    Confirma importação com dados revisados (versão com body JSON).
+    """
+    return await confirmar_importacao_revisada(
+        empresa_id=empresa_id,
+        dados_revisados=request.dados,
+        ano=request.ano,
+        mes=request.mes,
+        user=user
+    )
 
 
 if __name__ == "__main__":

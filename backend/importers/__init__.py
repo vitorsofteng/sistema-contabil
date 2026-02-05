@@ -4,7 +4,7 @@
 Módulo de Importação Avançada - Sistema Contábil
 =================================================
 
-Suporta: CSV, Excel (XLSX), OFX/QIF, XML NFe
+Suporta: CSV, OFX/QIF, XML NFe, PDF (balancetes)
 """
 
 import os
@@ -18,7 +18,6 @@ from .base import (
     HistoricoImportacao, MapeamentoImportacao, RegistroImportadoDB
 )
 from .csv_importer import ImportadorCSV
-from .excel_importer import ImportadorExcel
 from .ofx_importer import ImportadorOFX
 from .nfe_importer import ImportadorNFe
 
@@ -59,7 +58,6 @@ from data.database import get_db, salvar_dados_mensais
 # Registro de importadores disponíveis
 IMPORTADORES: Dict[str, Type[ImportadorBase]] = {
     'csv': ImportadorCSV,
-    'xlsx': ImportadorExcel,
     'ofx': ImportadorOFX,
     'xml_nfe': ImportadorNFe
 }
@@ -68,9 +66,6 @@ IMPORTADORES: Dict[str, Type[ImportadorBase]] = {
 EXTENSAO_PARA_TIPO = {
     '.csv': 'csv',
     '.txt': 'csv',
-    '.xlsx': 'xlsx',
-    '.xls': 'xlsx',
-    '.xlsm': 'xlsx',
     '.ofx': 'ofx',
     '.qif': 'ofx',
     '.qfx': 'ofx',
@@ -430,12 +425,12 @@ def obter_mapeamento_padrao(
 
 
 # ============================================================================
-# IMPORTADOR DE BALANCETES (PDF/XLS)
+# IMPORTADOR DE BALANCETES (PDF)
 # ============================================================================
 
 def importar_balancete(conteudo: bytes, nome_arquivo: str) -> Dict:
     """
-    Importa balancete de arquivo PDF ou XLS.
+    Importa balancete de arquivo PDF.
     
     Extrai automaticamente:
     - CNPJ e dados da empresa
@@ -557,7 +552,7 @@ def importar_balancete_e_salvar(
 
 __all__ = [
     # Importadores
-    'ImportadorBase', 'ImportadorCSV', 'ImportadorExcel', 'ImportadorOFX', 'ImportadorNFe',
+    'ImportadorBase', 'ImportadorCSV', 'ImportadorOFX', 'ImportadorNFe',
     
     # Funções principais
     'detectar_tipo_arquivo', 'obter_importador',
@@ -569,7 +564,7 @@ __all__ = [
     # Mapeamentos
     'salvar_mapeamento', 'listar_mapeamentos', 'obter_mapeamento_padrao',
     
-    # Balancetes (PDF/XLS)
+    # Balancetes (PDF)
     'importar_balancete', 'importar_balancete_e_salvar',
     'BALANCETE_IMPORTER_AVAILABLE', 'BALANCETE_FINAL_AVAILABLE',
     'importar_balancete_completo', 'importar_arquivo_balancete',

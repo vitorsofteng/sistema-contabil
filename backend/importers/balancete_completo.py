@@ -3,7 +3,7 @@ Importador Completo de Balancetes
 Sistema Contábil - Sprint 5
 
 Este módulo:
-1. Importa balancetes PDF/XLS sem cadastro prévio de empresa
+1. Importa balancetes PDF sem cadastro prévio de empresa
 2. Identifica empresa pelo CNPJ (cria se não existir)
 3. Mapeia TODAS as contas do plano de contas
 4. Retorna dados estruturados para exibição no frontend
@@ -536,101 +536,6 @@ class ResultadoImportacaoCompleto:
 
 
 # ============================================================================
-# PARSER BINÁRIO DE XLS
-# ============================================================================
-
-class ParserXLS:
-    """Parser de arquivos XLS antigos (Excel 97-2003)."""
-    
-    def extrair_dados(self, conteudo: bytes) -> Tuple[List[str], List[float]]:
-        """Extrai strings e valores numéricos do arquivo XLS."""
-        strings = self._extrair_strings_utf16(conteudo)
-        valores = self._extrair_valores_ieee754(conteudo)
-        return strings, valores
-    
-    def _extrair_strings_utf16(self, data: bytes) -> List[str]:
-        """Extrai strings UTF-16LE."""
-        strings = []
-        i = 0
-        
-        while i < len(data) - 1:
-            if data[i] >= 32 and data[i] < 127 and data[i+1] == 0:
-                texto = []
-                j = i
-                while j < len(data) - 1:
-                    low = data[j]
-                    high = data[j+1] if j+1 < len(data) else 0
-                    char_code = low | (high << 8)
-                    
-                    if (32 <= char_code < 127) or (0xC0 <= char_code <= 0xFF) or char_code in [0x2D, 0x2F, 0x2E, 0x28, 0x29]:
-                        texto.append(chr(char_code))
-                        j += 2
-                    elif char_code == 0:
-                        break
-                    else:
-                        break
-                
-                if len(texto) >= 2:
-                    s = ''.join(texto).strip()
-                    if s:
-                        strings.append(s)
-                    i = j
-                else:
-                    i += 2
-            else:
-                i += 1
-        
-        # Buscar strings específicas importantes
-        for termo in ['Empresa:', 'C.N.P.J.:', 'CNPJ:', 'Período:', 'Contador', 'CPF:', 'CRC', 'Sistema']:
-            termo_bytes = termo.encode('utf-16-le')
-            pos = 0
-            while True:
-                pos = data.find(termo_bytes, pos)
-                if pos < 0:
-                    break
-                
-                context = data[pos:pos+500]
-                try:
-                    decoded = ""
-                    for k in range(0, min(len(context)-1, 400), 2):
-                        char_code = context[k] | (context[k+1] << 8)
-                        if (32 <= char_code < 127) or (0xC0 <= char_code <= 0xFF) or char_code in [0x2D, 0x2F, 0x2E, 0x3A, 0x28, 0x29]:
-                            decoded += chr(char_code)
-                        elif char_code == 0:
-                            continue
-                        elif len(decoded) > 10:
-                            break
-                    
-                    if decoded:
-                        decoded = re.sub(r'\s+', ' ', decoded.strip())
-                        if decoded and decoded not in strings:
-                            strings.append(decoded)
-                except:
-                    pass
-                
-                pos += 2
-        
-        return strings
-    
-    def _extrair_valores_ieee754(self, data: bytes) -> List[Tuple[float, int]]:
-        """Extrai valores numéricos com suas posições."""
-        valores = []
-        
-        for i in range(0, len(data) - 8):
-            try:
-                val = struct.unpack('<d', data[i:i+8])[0]
-                if 0.01 <= abs(val) <= 1e12:
-                    rounded = round(val, 2)
-                    if abs(val - rounded) < 0.001:
-                        valores.append((rounded, i))
-            except:
-                pass
-        
-        # Ordenar por valor (descendente)
-        valores.sort(key=lambda x: -x[0])
-        return valores
-
-
 # ============================================================================
 # IMPORTADOR COMPLETO
 # ============================================================================
@@ -639,7 +544,6 @@ class ImportadorBalanceteCompleto:
     """Importador completo de balancetes com mapeamento total."""
     
     def __init__(self):
-        self.parser_xls = ParserXLS()
         self.mapeador = MapeadorContas()
         
         # Valores conhecidos do balancete de exemplo
@@ -673,14 +577,12 @@ class ImportadorBalanceteCompleto:
         }
     
     def importar(self, conteudo: bytes, nome_arquivo: str) -> ResultadoImportacaoCompleto:
-        """Importa balancete de arquivo PDF ou XLS."""
+        """Importa balancete de arquivo PDF."""
         extensao = os.path.splitext(nome_arquivo)[1].lower()
         
         try:
             if extensao == '.pdf':
                 return self._importar_pdf(conteudo, nome_arquivo)
-            elif extensao in ['.xls', '.xlsx', '.xlsm']:
-                return self._importar_excel(conteudo, nome_arquivo)
             else:
                 return ResultadoImportacaoCompleto(
                     sucesso=False,
@@ -691,134 +593,6 @@ class ImportadorBalanceteCompleto:
                 sucesso=False,
                 mensagem=f"Erro ao processar arquivo: {str(e)}",
                 erros=[str(e)]
-            )
-    
-    def _importar_excel(self, conteudo: bytes, nome_arquivo: str) -> ResultadoImportacaoCompleto:
-        """Importa arquivo Excel."""
-        # Verificar tipo
-        if conteudo[:4] == b'\xd0\xcf\x11\xe0':
-            # XLS antigo
-            return self._importar_xls_binario(conteudo, nome_arquivo)
-        elif conteudo[:2] == b'PK':
-            # XLSX moderno
-            return self._importar_xlsx(conteudo, nome_arquivo)
-        else:
-            # Tentar XLS
-            return self._importar_xls_binario(conteudo, nome_arquivo)
-    
-    def _importar_xls_binario(self, conteudo: bytes, nome_arquivo: str) -> ResultadoImportacaoCompleto:
-        """Importa XLS usando parser binário."""
-        avisos = []
-        erros = []
-        
-        # Extrair dados
-        strings, valores = self.parser_xls.extrair_dados(conteudo)
-        
-        # Concatenar strings para extração de metadados
-        texto = '\n'.join(strings)
-        
-        # Extrair CNPJ
-        cnpj = self._extrair_cnpj(texto)
-        if not cnpj:
-            return ResultadoImportacaoCompleto(
-                sucesso=False,
-                mensagem="CNPJ não encontrado no documento"
-            )
-        
-        # Extrair nome da empresa
-        nome_empresa = self._extrair_nome_empresa(texto)
-        if not nome_empresa:
-            nome_empresa = "EMPRESA NÃO IDENTIFICADA"
-            avisos.append("Nome da empresa não identificado")
-        
-        # Extrair período
-        periodo_inicio, periodo_fim = self._extrair_periodo(texto)
-        if not periodo_inicio:
-            avisos.append("Período não identificado")
-            periodo_fim = date.today()
-            periodo_inicio = periodo_fim.replace(day=1)
-        
-        # Extrair contador
-        contador_nome, contador_crc, contador_cpf = self._extrair_contador(texto)
-        
-        # Extrair sistema de origem
-        sistema = self._extrair_sistema(texto)
-        
-        # Criar estrutura da empresa
-        empresa = DadosEmpresaCompleto(
-            nome=nome_empresa,
-            cnpj=cnpj,
-            contador_nome=contador_nome,
-            contador_crc=contador_crc,
-            contador_cpf=contador_cpf,
-            sistema_contabil=sistema
-        )
-        
-        # Criar balancete
-        balancete = BalanceteCompleto(
-            empresa=empresa,
-            periodo_inicio=periodo_inicio,
-            periodo_fim=periodo_fim,
-            arquivo_origem=nome_arquivo,
-            hash_arquivo=hashlib.md5(conteudo).hexdigest()
-        )
-        
-        # Processar contas
-        contas, mapeamento, preview = self._processar_contas(strings, valores)
-        
-        balancete.contas = contas
-        balancete.total_contas = len(contas)
-        balancete.contas_mapeadas = len([c for c in contas if c.campo_sistema])
-        
-        # Identificar clientes e sócios
-        self._identificar_clientes_socios(balancete, strings, valores)
-        
-        return ResultadoImportacaoCompleto(
-            sucesso=True,
-            mensagem=f"Balancete importado: {nome_empresa}",
-            balancete=balancete,
-            avisos=avisos,
-            erros=erros,
-            mapeamento_colunas=mapeamento,
-            preview_dados=preview
-        )
-    
-    def _importar_xlsx(self, conteudo: bytes, nome_arquivo: str) -> ResultadoImportacaoCompleto:
-        """Importa XLSX."""
-        try:
-            import openpyxl
-            import io
-            
-            wb = openpyxl.load_workbook(io.BytesIO(conteudo), data_only=True)
-            ws = wb.active
-            
-            strings = []
-            valores = []
-            
-            for row in ws.iter_rows():
-                for cell in row:
-                    val = cell.value
-                    if val:
-                        if isinstance(val, (int, float)):
-                            valores.append((float(val), 0))
-                        else:
-                            strings.append(str(val))
-            
-            wb.close()
-            
-            # Processar como XLS
-            conteudo_texto = '\n'.join(strings)
-            # ... continuar processamento
-            
-        except ImportError:
-            return ResultadoImportacaoCompleto(
-                sucesso=False,
-                mensagem="openpyxl não disponível para XLSX"
-            )
-        except Exception as e:
-            return ResultadoImportacaoCompleto(
-                sucesso=False,
-                mensagem=f"Erro ao ler XLSX: {str(e)}"
             )
     
     def _importar_pdf(self, conteudo: bytes, nome_arquivo: str) -> ResultadoImportacaoCompleto:
@@ -853,7 +627,7 @@ class ImportadorBalanceteCompleto:
         
         strings = texto.split('\n')
         
-        # Usar mesmo processamento do XLS
+        # Processar contas
         return self._processar_texto_balancete(strings, valores, conteudo, nome_arquivo)
     
     def _processar_texto_balancete(self, strings: List[str], valores: List[Tuple[float, int]], 

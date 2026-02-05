@@ -112,6 +112,23 @@ class CalculadoraIndicadores:
         
         pl = float(dados.get('patrimonio_liquido') or dados.get('capital_social') or 0)
         
+        # =================================================================
+        # VALIDAÇÃO DO ATIVO TOTAL PARA ROA CORRETO
+        # =================================================================
+        # Problema comum: ativo_total pode estar zerado ou com valor incorreto
+        # Se ativo_circulante > ativo_total, usar ativo_circulante
+        if ac > at and ac > 0:
+            at = ac
+        
+        # Se ativo_total parece muito pequeno (menor que PL), algo está errado
+        if at > 0 and pl > 0 and at < pl:
+            if ac > at:
+                at = ac
+        
+        # Se ainda não temos ativo_total mas temos passivo + PL, calcular
+        if at == 0 and (pc + pnc + pl) > 0:
+            at = pc + pnc + pl
+        
         # Receita - aceitar vários nomes
         rb = float(dados.get('receita_bruta') or dados.get('receita_servicos') or dados.get('receita') or 0)
         ded = float(dados.get('deducoes_receita') or dados.get('impostos_sobre_vendas') or dados.get('impostos') or 0)
@@ -137,7 +154,23 @@ class CalculadoraIndicadores:
         irpj = float(dados.get('irpj_deducao') or dados.get('irpj') or 0)
         csll = float(dados.get('csll_deducao') or dados.get('csll') or 0)
         icms = float(dados.get('icms_deducao') or dados.get('icms') or 0)
-        impostos_total = iss + pis + cofins + irpj + csll + icms
+        
+        # Soma dos impostos individuais
+        soma_impostos_individuais = iss + pis + cofins + irpj + csll + icms
+        
+        # CORREÇÃO DEFINITIVA: Usar o maior valor entre:
+        # 1. Soma dos impostos individuais (incluindo ICMS se disponível)
+        # 2. Campo 'impostos' (calculado pelo parser)
+        # 3. Campo 'deducoes_receita' (fallback)
+        impostos_campo = float(dados.get('impostos') or dados.get('impostos_total') or 0)
+        
+        # Se ICMS está zerado mas temos impostos > soma, deduzir ICMS
+        if icms == 0 and impostos_campo > soma_impostos_individuais:
+            icms = impostos_campo - soma_impostos_individuais
+            soma_impostos_individuais = impostos_campo
+        
+        # Usar o maior valor disponível
+        impostos_total = max(soma_impostos_individuais, impostos_campo, ded)
         
         # Se não tem impostos detalhados, usar deduções
         if impostos_total == 0:

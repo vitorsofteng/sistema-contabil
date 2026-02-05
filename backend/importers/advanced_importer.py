@@ -4,7 +4,7 @@
 Importação Avançada de Dados - Sistema Contábil
 ================================================
 
-Suporte a CSV, Excel, OFX (extratos bancários) e XML NFe
+Suporte a CSV, OFX (extratos bancários) e XML NFe
 """
 
 import os
@@ -415,70 +415,6 @@ def importar_csv(
     return resultado
 
 
-def importar_excel(
-    conteudo: bytes,
-    mapeamento: Dict,
-    sheet: str = None,
-    linha_cabecalho: int = 1,
-    pular_linhas: int = 0
-) -> ResultadoImportacao:
-    """Importa dados de arquivo Excel."""
-    resultado = ResultadoImportacao(sucesso=True)
-    
-    if not EXCEL_AVAILABLE:
-        resultado.sucesso = False
-        resultado.mensagens_erro.append({'linha': 0, 'erro': 'Biblioteca openpyxl não disponível'})
-        return resultado
-    
-    try:
-        wb = openpyxl.load_workbook(io.BytesIO(conteudo), data_only=True)
-        ws = wb[sheet] if sheet and sheet in wb.sheetnames else wb.active
-        
-        # Lê todas as linhas
-        linhas = list(ws.iter_rows(values_only=True))
-        
-        if len(linhas) < linha_cabecalho:
-            resultado.sucesso = False
-            resultado.mensagens_erro.append({'linha': 0, 'erro': 'Arquivo vazio ou cabeçalho não encontrado'})
-            return resultado
-        
-        # Cabeçalho
-        cabecalho = [str(c).strip().lower() if c else f'col_{i}' for i, c in enumerate(linhas[linha_cabecalho - 1])]
-        
-        # Processa linhas de dados
-        for i, linha in enumerate(linhas[linha_cabecalho + pular_linhas:], start=linha_cabecalho + pular_linhas + 1):
-            if not any(linha):
-                continue
-            
-            resultado.total += 1
-            dados_orig = dict(zip(cabecalho, linha))
-            
-            try:
-                dado = extrair_dados_linha(dados_orig, mapeamento, i)
-                if dado.erro:
-                    resultado.erros += 1
-                    resultado.mensagens_erro.append({'linha': i, 'erro': dado.erro, 'dados': str(dados_orig)})
-                else:
-                    resultado.dados.append(dado)
-                    resultado.importados += 1
-            except Exception as e:
-                resultado.erros += 1
-                resultado.mensagens_erro.append({'linha': i, 'erro': str(e), 'dados': str(dados_orig)})
-        
-        # Preview
-        for linha in linhas[linha_cabecalho:linha_cabecalho + 5]:
-            if any(linha):
-                resultado.preview.append(dict(zip(cabecalho, [str(v) if v else '' for v in linha])))
-        
-        wb.close()
-        
-    except Exception as e:
-        resultado.sucesso = False
-        resultado.mensagens_erro.append({'linha': 0, 'erro': f'Erro ao ler Excel: {str(e)}'})
-    
-    return resultado
-
-
 def importar_ofx(conteudo: bytes) -> ResultadoImportacao:
     """Importa dados de arquivo OFX (extrato bancário)."""
     resultado = ResultadoImportacao(sucesso=True)
@@ -713,8 +649,8 @@ def detectar_tipo_arquivo(nome_arquivo: str, conteudo: bytes = None) -> str:
     """Detecta tipo de arquivo."""
     nome = nome_arquivo.lower()
     
-    if nome.endswith('.xlsx') or nome.endswith('.xls'):
-        return 'xlsx'
+    if nome.endswith('.csv') or nome.endswith('.txt'):
+        return 'csv'
     elif nome.endswith('.ofx') or nome.endswith('.qif'):
         return 'ofx'
     elif nome.endswith('.xml'):
@@ -756,15 +692,6 @@ def detectar_mapeamento(conteudo: bytes, tipo: str) -> Dict:
         except:
             pass
     
-    elif tipo == 'xlsx' and EXCEL_AVAILABLE:
-        try:
-            wb = openpyxl.load_workbook(io.BytesIO(conteudo), data_only=True)
-            ws = wb.active
-            primeira_linha = next(ws.iter_rows(max_row=1, values_only=True))
-            cabecalho = [str(c).strip().lower() if c else '' for c in primeira_linha]
-            wb.close()
-        except:
-            pass
     
     # Mapeia colunas encontradas
     for campo, aliases in conhecidos.items():
@@ -826,9 +753,7 @@ def processar_importacao(
         importacao.mapeamento_json = json.dumps(mapeamento)
         
         # Processa conforme tipo
-        if tipo == 'xlsx':
-            resultado = importar_excel(conteudo, mapeamento)
-        elif tipo == 'ofx':
+        if tipo == 'ofx':
             resultado = importar_ofx(conteudo)
         elif tipo == 'xml_nfe':
             resultado = importar_xml_nfe(conteudo)
@@ -934,9 +859,7 @@ def preview_importacao(
     if not mapeamento:
         mapeamento = detectar_mapeamento(conteudo, tipo)
     
-    if tipo == 'xlsx':
-        resultado = importar_excel(conteudo, mapeamento)
-    elif tipo == 'ofx':
+    if tipo == 'ofx':
         resultado = importar_ofx(conteudo)
     elif tipo == 'xml_nfe':
         resultado = importar_xml_nfe(conteudo)
