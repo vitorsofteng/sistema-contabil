@@ -6,11 +6,6 @@ COPY package.json package-lock.json* ./
 RUN npm install
 
 COPY . .
-
-# Build arg opcional - se vier, o Vite embute no JS
-ARG VITE_API_URL
-ENV VITE_API_URL=${VITE_API_URL}
-
 RUN npm run build
 
 # Stage 2: Serve com nginx
@@ -19,24 +14,8 @@ FROM nginx:1.25-alpine
 COPY --from=builder /app/dist /usr/share/nginx/html
 COPY nginx.railway.conf /etc/nginx/conf.d/default.conf
 
-# Script de inicialização que:
-# 1. Ajusta a porta para Railway ($PORT)
-# 2. Gera runtime-config.js com VITE_API_URL em runtime
-RUN cat > /docker-entrypoint.d/90-railway-init.sh << 'ENTRYPOINT'
-#!/bin/sh
-# Ajusta porta do nginx para $PORT do Railway
-if [ -n "$PORT" ]; then
-  sed -i "s/listen 80/listen $PORT/" /etc/nginx/conf.d/default.conf
-fi
-
-# Gera runtime-config.js com a URL real da API
-if [ -n "$VITE_API_URL" ]; then
-  echo "window.__RUNTIME_CONFIG__ = { API_URL: \"${VITE_API_URL}\" };" > /usr/share/nginx/html/runtime-config.js
-  echo ">> runtime-config.js gerado com API_URL=${VITE_API_URL}"
-else
-  echo ">> AVISO: VITE_API_URL nao definido, usando config do build"
-fi
-ENTRYPOINT
+# Copia entrypoint como arquivo separado
+COPY docker-entrypoint.sh /docker-entrypoint.d/90-railway-init.sh
 RUN chmod +x /docker-entrypoint.d/90-railway-init.sh
 
 EXPOSE 80
