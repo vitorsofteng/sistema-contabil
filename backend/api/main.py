@@ -133,11 +133,11 @@ IS_PRODUCTION = _env in ("production", "staging")
 if IS_PRODUCTION and SETTINGS_AVAILABLE:
     errors = settings.validate_production()
     if errors:
-        print("=" * 60)
-        print("ERRO: Configurações de produção inválidas!")
+        logger.info("=" * 60)
+        logger.info("ERRO: Configurações de produção inválidas!")
         for error in errors:
-            print(f"  - {error}")
-        print("=" * 60)
+            logger.info(f"  - {error}")
+        logger.info("=" * 60)
         # Em produção/staging, não iniciar com configuração insegura
         sys.exit(1)
 
@@ -207,6 +207,10 @@ pdf_generator = PDFGeneratorPro()
 # ==============================================================================
 
 import logging
+logging.basicConfig(
+    level=logging.DEBUG if os.getenv("DEBUG", "false").lower() == "true" else logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+)
 logger = logging.getLogger("contabil.api")
 
 def _log_error(endpoint: str, error: Exception):
@@ -244,32 +248,32 @@ def _get_client_ip(request: Request) -> str:
 @app.on_event("startup")
 async def startup_event():
     """Executado ao iniciar a aplicação."""
-    print("=" * 60)
-    print(f"Sistema Contábil v3.0.0 iniciando...")
-    print(f"Ambiente: {os.getenv('ENVIRONMENT', 'development')}")
-    print(f"Rate Limiting: {'Ativado' if rate_limiter else 'Desativado'}")
-    print(f"Security Headers: {'Ativado' if SECURITY_MIDDLEWARE_AVAILABLE else 'Desativado'}")
-    print(f"2FA (TOTP): {'Disponível' if SECURITY_ADVANCED_AVAILABLE else 'Não disponível'}")
+    logger.info("=" * 60)
+    logger.info(f"Sistema Contábil v3.0.0 iniciando...")
+    logger.info(f"Ambiente: {os.getenv('ENVIRONMENT', 'development')}")
+    logger.info(f"Rate Limiting: {'Ativado' if rate_limiter else 'Desativado'}")
+    logger.info(f"Security Headers: {'Ativado' if SECURITY_MIDDLEWARE_AVAILABLE else 'Desativado'}")
+    logger.info(f"2FA (TOTP): {'Disponível' if SECURITY_ADVANCED_AVAILABLE else 'Não disponível'}")
     
     # Validar configurações em produção
     if IS_PRODUCTION:
         jwt_secret = os.getenv("JWT_SECRET", "")
         if not jwt_secret or "DEVELOPMENT" in jwt_secret.upper() or len(jwt_secret) < 32:
-            print("⚠️  AVISO: JWT_SECRET não configurado corretamente para produção!")
+            logger.info("⚠️  AVISO: JWT_SECRET não configurado corretamente para produção!")
         
         encryption_key = os.getenv("ENCRYPTION_KEY", "")
         if not encryption_key or "DEVELOPMENT" in encryption_key.upper():
-            print("⚠️  AVISO: ENCRYPTION_KEY não configurado corretamente para produção!")
+            logger.info("⚠️  AVISO: ENCRYPTION_KEY não configurado corretamente para produção!")
         
         if os.getenv("DEBUG", "false").lower() == "true":
-            print("⚠️  AVISO: DEBUG está ativado em produção!")
+            logger.info("⚠️  AVISO: DEBUG está ativado em produção!")
     
     # Inicializar banco de dados
     try:
         init_db()
-        print("✅ Banco de dados inicializado")
+        logger.info("✅ Banco de dados inicializado")
     except Exception as e:
-        print(f"❌ Erro ao inicializar banco: {e}")
+        logger.info(f"❌ Erro ao inicializar banco: {e}")
     
     # Criar tabelas de segurança avançada (Sprint 2)
     try:
@@ -360,11 +364,11 @@ async def startup_event():
                 except Exception:
                     db.rollback()  # Índice já existe, ignorar
             
-            print("✅ Tabelas de segurança avançada verificadas/criadas")
+            logger.info("✅ Tabelas de segurança avançada verificadas/criadas")
     except Exception as e:
-        print(f"⚠️  Aviso ao criar tabelas de segurança: {e}")
+        logger.info(f"⚠️  Aviso ao criar tabelas de segurança: {e}")
     
-    print("=" * 60)
+    logger.info("=" * 60)
 
 
 # ==============================================================================
@@ -522,8 +526,6 @@ async def detectar_sistema_contabil(arquivo: UploadFile = File(...)):
         }
         
     except Exception as e:
-        import traceback
-        traceback.print_exc()
         # Em caso de erro, retorna desconhecido
         return {
             "detectado": False,
@@ -607,8 +609,6 @@ async def preview_importacao_dominio(file: UploadFile = File(...)):
         }
         
     except Exception as e:
-        import traceback
-        traceback.print_exc()
         return {
             "sucesso": False,
             "erro": f"Erro ao processar: {str(e)}",
@@ -860,15 +860,15 @@ async def registrar(dados: ContadorCreate, request: Request):
         
         # Enviar email de verificação
         if EMAIL_SERVICE_AVAILABLE and email_service and result.get('verification_token'):
-            print(f"📧 Enviando email de verificação para {dados.email}...")
+            logger.debug(f"📧 Enviando email de verificação para {dados.email}...")
             sent = email_service.send_email_verification(
                 to_email=dados.email,
                 verification_token=result['verification_token'],
                 user_name=dados.nome
             )
-            print(f"📧 Resultado envio: {'✅ OK' if sent else '❌ FALHOU'}")
+            logger.debug(f"📧 Resultado envio: {'✅ OK' if sent else '❌ FALHOU'}")
         else:
-            print(f"⚠️ Email NÃO enviado: SERVICE={EMAIL_SERVICE_AVAILABLE}, service={email_service is not None}, token={'sim' if result.get('verification_token') else 'não'}")
+            logger.debug(f"⚠️ Email NÃO enviado: SERVICE={EMAIL_SERVICE_AVAILABLE}, service={email_service is not None}, token={'sim' if result.get('verification_token') else 'não'}")
         
         return {
             "message": "Conta criada com sucesso. Verifique seu email para ativar a conta.",
@@ -1091,15 +1091,15 @@ async def solicitar_reset(dados: ResetSenhaRequest, request: Request):
     
     # Enviar email de recuperação
     if token and EMAIL_SERVICE_AVAILABLE and email_service:
-        print(f"📧 Enviando email de reset de senha para {dados.email}...")
+        logger.debug(f"📧 Enviando email de reset de senha para {dados.email}...")
         sent = email_service.send_password_reset(
             to_email=dados.email,
             reset_token=token,
             user_name=dados.email.split('@')[0]
         )
-        print(f"📧 Resultado envio reset: {'✅ OK' if sent else '❌ FALHOU'}")
+        logger.debug(f"📧 Resultado envio reset: {'✅ OK' if sent else '❌ FALHOU'}")
     else:
-        print(f"⚠️ Email reset NÃO enviado: token={'sim' if token else 'não'}, service={EMAIL_SERVICE_AVAILABLE}")
+        logger.debug(f"⚠️ Email reset NÃO enviado: token={'sim' if token else 'não'}, service={EMAIL_SERVICE_AVAILABLE}")
     
     response = {
         "ok": True, 
@@ -1329,7 +1329,7 @@ async def setup_2fa(user: Dict = Depends(get_user)):
                 "data": result
             }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erro ao configurar 2FA: {str(e)}")
+        raise HTTPException(status_code=500, detail="Erro interno do servidor")
 
 
 @app.post("/auth/2fa/enable")
@@ -1359,7 +1359,7 @@ async def enable_2fa(dados: Verify2FARequest, user: Dict = Depends(get_user)):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erro ao ativar 2FA: {str(e)}")
+        raise HTTPException(status_code=500, detail="Erro interno do servidor")
 
 
 @app.post("/auth/2fa/verify")
@@ -1665,21 +1665,21 @@ async def get_empresa_by_cnpj(cnpj: str, user: Dict = Depends(get_user)):
     # Limpar CNPJ (remover formatação)
     cnpj_limpo = ''.join(c for c in cnpj if c.isdigit())
     
-    print(f"[DEBUG] Buscando empresa por CNPJ: {cnpj} -> limpo: {cnpj_limpo}")
+    logger.debug(f"[DEBUG] Buscando empresa por CNPJ: {cnpj} -> limpo: {cnpj_limpo}")
     
     # Buscar em todas as empresas do contador
     empresas = listar_empresas(user['id'])
     
-    print(f"[DEBUG] Total de empresas do usuário: {len(empresas)}")
+    logger.debug(f"[DEBUG] Total de empresas do usuário: {len(empresas)}")
     
     for emp in empresas:
         emp_cnpj = ''.join(c for c in (emp.get('cnpj') or '') if c.isdigit())
-        print(f"[DEBUG] Comparando: '{emp_cnpj}' == '{cnpj_limpo}' ? {emp_cnpj == cnpj_limpo}")
+        logger.debug(f"[DEBUG] Comparando: '{emp_cnpj}' == '{cnpj_limpo}' ? {emp_cnpj == cnpj_limpo}")
         if emp_cnpj == cnpj_limpo:
-            print(f"[DEBUG] Empresa encontrada: {emp.get('razao_social')}")
+            logger.debug(f"[DEBUG] Empresa encontrada: {emp.get('razao_social')}")
             return emp
     
-    print(f"[DEBUG] Empresa com CNPJ {cnpj_limpo} não encontrada")
+    logger.debug(f"[DEBUG] Empresa com CNPJ {cnpj_limpo} não encontrada")
     raise HTTPException(status_code=404, detail="Empresa não encontrada")
 
 
@@ -1689,21 +1689,21 @@ async def buscar_empresa_por_cnpj(cnpj: str, user: Dict = Depends(get_user)):
     # Limpar CNPJ (remover formatação)
     cnpj_limpo = ''.join(c for c in cnpj if c.isdigit())
     
-    print(f"[API] Buscando empresa por CNPJ: {cnpj} -> limpo: {cnpj_limpo}")
+    logger.debug(f"[API] Buscando empresa por CNPJ: {cnpj} -> limpo: {cnpj_limpo}")
     
     # Buscar em todas as empresas do contador
     empresas = listar_empresas(user['id'])
     
-    print(f"[API] Total de empresas do usuário {user['id']}: {len(empresas)}")
+    logger.debug(f"[API] Total de empresas do usuário {user['id']}: {len(empresas)}")
     
     for emp in empresas:
         emp_cnpj = ''.join(c for c in (emp.get('cnpj') or '') if c.isdigit())
-        print(f"[API] Comparando: '{emp_cnpj}' == '{cnpj_limpo}' ? {emp_cnpj == cnpj_limpo}")
+        logger.debug(f"[API] Comparando: '{emp_cnpj}' == '{cnpj_limpo}' ? {emp_cnpj == cnpj_limpo}")
         if emp_cnpj == cnpj_limpo:
-            print(f"[API] ✓ Empresa encontrada: {emp.get('razao_social')} (ID: {emp.get('id')})")
+            logger.debug(f"[API] ✓ Empresa encontrada: {emp.get('razao_social')} (ID: {emp.get('id')})")
             return {"encontrada": True, "empresa": emp}
     
-    print(f"[API] ✗ Empresa com CNPJ {cnpj_limpo} não encontrada")
+    logger.debug(f"[API] ✗ Empresa com CNPJ {cnpj_limpo} não encontrada")
     return {"encontrada": False, "empresa": None}
 
 @app.get("/empresas/{id}")
@@ -1736,9 +1736,9 @@ async def lista_dados(id: int, user: Dict = Depends(get_user)):
     if not obter_empresa(id, user['id']):
         raise HTTPException(status_code=404, detail="Empresa não encontrada")
     dados_raw = listar_dados_mensais(id)
-    print(f"[API] Listando dados para empresa {id}: {len(dados_raw)} registros")
+    logger.debug(f"[API] Listando dados para empresa {id}: {len(dados_raw)} registros")
     if dados_raw:
-        print(f"[API] Primeiro registro raw: {dados_raw[0]}")
+        logger.debug(f"[API] Primeiro registro raw: {dados_raw[0]}")
     
     # Transforma para formato do frontend
     dados = []
@@ -1771,7 +1771,7 @@ async def lista_dados(id: int, user: Dict = Depends(get_user)):
             'margem_liquida': margem
         })
     
-    print(f"[API] Dados formatados para frontend: {dados}")
+    logger.debug(f"[API] Dados formatados para frontend: {dados}")
     return {"dados": dados}
 
 @app.post("/empresas/{id}/dados")
@@ -1889,7 +1889,7 @@ async def add_dados(id: int, dados: DadosMensaisFrontend, user: Dict = Depends(g
                         alertas_gerados += 1
                     db.commit()
     except Exception as e:
-        print(f"Aviso: Erro ao gerar alertas automaticamente: {e}")
+        logger.info(f"Aviso: Erro ao gerar alertas automaticamente: {e}")
     
     return {"ok": True, "mes": f"{mes:02d}/{ano}", "alertas_gerados": alertas_gerados}
 
@@ -1912,7 +1912,7 @@ async def add_dados_bulk(id: int, dados: DadosBulk, user: Dict = Depends(get_use
         dados_normalizados, observacoes = normalizar_dados_importacao(dados_lista)
         
         if observacoes:
-            print(f"[API] Normalização: {observacoes}")
+            logger.debug(f"[API] Normalização: {observacoes}")
         
         for dados_dict in dados_normalizados:
             salvar_dados_mensais(id, dados_dict)
@@ -1924,7 +1924,7 @@ async def add_dados_bulk(id: int, dados: DadosBulk, user: Dict = Depends(get_use
         }
     except ImportError:
         # Fallback se módulo não disponível
-        print("[API] Módulo de normalização não disponível, salvando sem normalização")
+        logger.debug("[API] Módulo de normalização não disponível, salvando sem normalização")
         for d in dados.dados:
             dados_dict = d.model_dump()
             dados_dict['ano'] = d.ano
@@ -2163,7 +2163,7 @@ async def executar_analise_route(id: int, user: Dict = Depends(get_user)):
                     })
                 db.commit()
         except Exception as e:
-            print(f"Aviso: Erro ao gerar alertas automaticamente: {e}")
+            logger.info(f"Aviso: Erro ao gerar alertas automaticamente: {e}")
         
         return {"analise_id": analise_id, "resultado": resultado, "alertas_gerados": len(alertas) if 'alertas' in dir() else 0}
         
@@ -2842,7 +2842,7 @@ try:
     )
     IMPORTACAO_IA_AVAILABLE = True
 except ImportError as e:
-    print(f"Módulo importação IA não disponível: {e}")
+    logger.info(f"Módulo importação IA não disponível: {e}")
     IMPORTACAO_IA_AVAILABLE = False
 
 # Tenta importar módulo de importação inteligente (parser local + IA)
@@ -2852,9 +2852,9 @@ try:
         verificar_status as verificar_status_importacao
     )
     IMPORTACAO_INTELIGENTE_AVAILABLE = True
-    print("[INIT] Importação inteligente ativada (parser local + IA fallback)")
+    logger.info("[INIT] Importação inteligente ativada (parser local + IA fallback)")
 except ImportError as e:
-    print(f"Módulo importação inteligente não disponível: {e}")
+    logger.info(f"Módulo importação inteligente não disponível: {e}")
     IMPORTACAO_INTELIGENTE_AVAILABLE = False
 
 
@@ -2929,8 +2929,8 @@ async def importar_arquivo_com_ia(
     Args:
         forcar_ia: Se True, pula parser local e usa IA direto
     """
-    print(f"[API] === INICIANDO IMPORTAÇÃO ===")
-    print(f"[API] empresa_id={empresa_id}, arquivo={file.filename}, substituir={substituir_existentes}, forcar_ia={forcar_ia}")
+    logger.debug(f"[API] === INICIANDO IMPORTAÇÃO ===")
+    logger.debug(f"[API] empresa_id={empresa_id}, arquivo={file.filename}, substituir={substituir_existentes}, forcar_ia={forcar_ia}")
     
     # Verificar empresa
     empresa = obter_empresa(empresa_id, user['id'])
@@ -2939,7 +2939,7 @@ async def importar_arquivo_com_ia(
     
     # Obter sistema contábil da empresa
     sistema_contabil = empresa.get('sistema_contabil', 0)
-    print(f"[API] Sistema contábil cadastrado: {sistema_contabil}")
+    logger.debug(f"[API] Sistema contábil cadastrado: {sistema_contabil}")
     
     # Obter nome do sistema para log
     try:
@@ -2947,7 +2947,7 @@ async def importar_arquivo_com_ia(
         info = get_sistema_info(sistema_contabil)
         nome_sistema = info.nome if info else "Desconhecido"
         possui_parser = sistema_tem_parser(sistema_contabil)
-        print(f"[API] Sistema: {nome_sistema}, Tem parser: {possui_parser}")
+        logger.debug(f"[API] Sistema: {nome_sistema}, Tem parser: {possui_parser}")
     except:
         nome_sistema = "Desconhecido"
         possui_parser = sistema_contabil == 1  # Só Domínio
@@ -3001,7 +3001,7 @@ async def importar_arquivo_com_ia(
                 
         except ImportError:
             # Roteador não disponível, usa método antigo
-            print("[API] Roteador não disponível, usando método legado")
+            logger.debug("[API] Roteador não disponível, usando método legado")
             
             # Usa importação inteligente se disponível
             if IMPORTACAO_INTELIGENTE_AVAILABLE:
@@ -3058,11 +3058,11 @@ async def importar_arquivo_com_ia(
         if resultado.mes:
             dados_salvar['mes'] = resultado.mes
         
-        print(f"[API] Salvando dados para empresa {empresa_id}")
-        print(f"[API] Método usado: {getattr(resultado, 'metodo_usado', 'ia')}")
-        print(f"[API] Dados: {dados_salvar}")
+        logger.debug(f"[API] Salvando dados para empresa {empresa_id}")
+        logger.debug(f"[API] Método usado: {getattr(resultado, 'metodo_usado', 'ia')}")
+        logger.debug(f"[API] Dados: {dados_salvar}")
         salvar_dados_mensais(empresa_id, dados_salvar)
-        print(f"[API] Dados salvos com sucesso!")
+        logger.debug(f"[API] Dados salvos com sucesso!")
         
         return {
             "sucesso": True,
@@ -3417,9 +3417,7 @@ async def salvar_configuracao_relatorio(
             db.commit()
             return {"ok": True, "message": "Configuração salva com sucesso"}
     except Exception as e:
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Erro ao salvar configuração: {str(e)}")
+        raise HTTPException(status_code=500, detail="Erro ao salvar configuração")
 
 
 @app.get("/relatorios/templates")
@@ -3507,7 +3505,7 @@ async def gerar_relatorio_pdf(
     except ImportError as e:
         raise HTTPException(status_code=501, detail=f"Gerador PDF não disponível: {str(e)}")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erro ao gerar PDF: {str(e)}")
+        raise HTTPException(status_code=500, detail="Erro ao gerar relatório")
     
     # Registrar histórico (criar tabela se não existe)
     try:
@@ -3542,7 +3540,7 @@ async def gerar_relatorio_pdf(
             })
             db.commit()
     except Exception as e:
-        print(f"Erro ao registrar histórico: {e}")
+        logger.info(f"Erro ao registrar histórico: {e}")
     
     filename = f"diagnostico_{empresa.get('razao_social', 'empresa').replace(' ', '_')[:30]}.pdf"
     
@@ -3604,7 +3602,7 @@ async def gerar_relatorio_excel(
     try:
         excel_bytes = gerar_excel(empresa, dados_mensais, ultima_analise, config, alertas)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erro ao gerar Excel: {str(e)}")
+        raise HTTPException(status_code=500, detail="Erro ao gerar relatório")
     
     # Registrar histórico
     try:
@@ -3638,7 +3636,7 @@ async def gerar_relatorio_excel(
             })
             db.commit()
     except Exception as e:
-        print(f"Erro ao registrar histórico: {e}")
+        logger.info(f"Erro ao registrar histórico: {e}")
     
     filename = f"diagnostico_{empresa.get('razao_social', 'empresa').replace(' ', '_')[:30]}.xlsx"
     
@@ -3700,7 +3698,7 @@ async def gerar_relatorio_pptx(
     try:
         pptx_bytes = gerar_pptx(empresa, dados_mensais, ultima_analise, config, alertas)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erro ao gerar PowerPoint: {str(e)}")
+        raise HTTPException(status_code=500, detail="Erro ao gerar relatório")
     
     # Registrar histórico
     try:
@@ -3734,7 +3732,7 @@ async def gerar_relatorio_pptx(
             })
             db.commit()
     except Exception as e:
-        print(f"Erro ao registrar histórico: {e}")
+        logger.info(f"Erro ao registrar histórico: {e}")
     
     filename = f"apresentacao_{empresa.get('razao_social', 'empresa').replace(' ', '_')[:30]}.pptx"
     
@@ -3769,11 +3767,11 @@ async def criar_link_compartilhado(
     if dados.expira_em_dias:
         expira_em = datetime.now() + timedelta(days=dados.expira_em_dias)
     
-    # Hash da senha se necessário
+    # Hash da senha se necessário (bcrypt com sal)
     senha_hash = None
     if dados.requer_senha and dados.senha:
-        import hashlib
-        senha_hash = hashlib.sha256(dados.senha.encode()).hexdigest()
+        from auth.security import hash_password
+        senha_hash = hash_password(dados.senha)
     
     try:
         with get_db() as db:
@@ -3799,7 +3797,7 @@ async def criar_link_compartilhado(
             })
             db.commit()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erro ao criar link. Execute as migrations: {str(e)}")
+        raise HTTPException(status_code=500, detail="Erro ao criar link compartilhado")
     
     # Construir URL
     base_url = os.getenv('BASE_URL', 'http://localhost')
@@ -3850,8 +3848,8 @@ async def acessar_link_compartilhado(
             if link.get('requer_senha') and link.get('senha_hash'):
                 if not senha:
                     raise HTTPException(status_code=401, detail="Senha requerida")
-                import hashlib
-                if hashlib.sha256(senha.encode()).hexdigest() != link['senha_hash']:
+                from auth.security import verify_password
+                if not verify_password(senha, link['senha_hash']):
                     raise HTTPException(status_code=401, detail="Senha incorreta")
             
             # Incrementar contador de acessos
@@ -3931,7 +3929,7 @@ async def acessar_link_compartilhado(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erro ao acessar link: {str(e)}")
+        raise HTTPException(status_code=500, detail="Erro ao acessar link compartilhado")
 
 
 @app.get("/relatorios/historico")
@@ -4438,9 +4436,7 @@ async def salvar_configuracao_alertas_empresa(
             db.commit()
             return {"ok": True, "message": "Configuração salva com sucesso"}
     except Exception as e:
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Erro ao salvar configuração: {str(e)}")
+        raise HTTPException(status_code=500, detail="Erro ao salvar configuração")
 
 
 @app.post("/empresas/{empresa_id}/alertas/gerar")
@@ -4468,7 +4464,7 @@ async def gerar_alertas_para_empresa(
             """), {"empresa_id": empresa_id, "contador_id": user['id']})
             db.commit()
     except Exception as e:
-        print(f"Aviso ao limpar alertas antigos: {e}")
+        logger.info(f"Aviso ao limpar alertas antigos: {e}")
     
     # Obter dados
     dados_mensais = listar_dados_mensais(empresa_id, limite=24)
@@ -4587,7 +4583,7 @@ async def gerar_alertas_todas_empresas(user: Dict = Depends(get_user)):
             
             db.commit()
     except Exception as e:
-        print(f"Aviso ao limpar alertas antigos: {e}")
+        logger.info(f"Aviso ao limpar alertas antigos: {e}")
     
     for empresa in empresas:
         try:
@@ -4664,7 +4660,7 @@ async def gerar_alertas_todas_empresas(user: Dict = Depends(get_user)):
                     
                     db.commit()
             except Exception as e:
-                print(f"Erro ao salvar alertas para empresa {empresa['id']}: {e}")
+                logger.info(f"Erro ao salvar alertas para empresa {empresa['id']}: {e}")
                 erros_salvamento.append(f"Geral: {str(e)}")
             
             total_alertas += len(alertas)
@@ -4706,7 +4702,7 @@ try:
     )
     ANALISE_FINANCEIRA_AVAILABLE = True
 except ImportError as e:
-    print(f"Módulo analise_avancada não disponível: {e}")
+    logger.info(f"Módulo analise_avancada não disponível: {e}")
     ANALISE_FINANCEIRA_AVAILABLE = False
 
 # Importa Score Profissional v2.0
@@ -4717,7 +4713,7 @@ try:
     )
     SCORE_PROFISSIONAL_AVAILABLE = True
 except ImportError as e:
-    print(f"Módulo score_profissional não disponível: {e}")
+    logger.info(f"Módulo score_profissional não disponível: {e}")
     SCORE_PROFISSIONAL_AVAILABLE = False
 
 
@@ -5233,7 +5229,7 @@ async def create_extra_tables():
             '''))
             
             db.commit()
-            print("✅ Tabelas de alertas verificadas/criadas")
+            logger.info("✅ Tabelas de alertas verificadas/criadas")
             
             # Tabelas F12 - Análise Financeira Avançada
             db.execute(text('''
@@ -5304,9 +5300,9 @@ async def create_extra_tables():
                 pass
             
             db.commit()
-            print("✅ Tabelas de análise financeira verificadas/criadas")
+            logger.info("✅ Tabelas de análise financeira verificadas/criadas")
     except Exception as e:
-        print(f"⚠️ Erro ao criar tabelas de alertas: {e}")
+        logger.info(f"⚠️ Erro ao criar tabelas de alertas: {e}")
 
 
 # ============================================================================
