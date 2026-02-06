@@ -4,6 +4,7 @@
  */
 
 import { useState, useCallback } from 'react';
+import { API_URL } from '../../config/api';
 
 /**
  * Hook para gerenciar o fluxo de revisão de importação
@@ -27,7 +28,7 @@ export function useRevisaoImportacao(apiCall) {
       formData.append('file', file);
       formData.append('forcar_ia', forcarIA.toString());
       
-      const response = await fetch(`/api/empresas/${empresaId}/importar/preview-validado`, {
+      const response = await fetch(`${API_URL}/api/empresas/${empresaId}/importar/preview-validado`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
@@ -70,7 +71,7 @@ export function useRevisaoImportacao(apiCall) {
     setEtapa('salvando');
     
     try {
-      const response = await fetch(`/api/empresas/${empresaId}/importar/confirmar`, {
+      const response = await fetch(`${API_URL}/api/empresas/${empresaId}/importar/confirmar`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`,

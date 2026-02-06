@@ -6,6 +6,7 @@ import { Header } from '../../components/layout';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
 import { formatarMoeda } from '../../utils/formatters';
+import { API_URL } from '../../config/api';
 
 function ImportacaoPage({ onNavigate }) {
   const { api } = useAuth();
@@ -186,7 +187,7 @@ function ImportacaoPage({ onNavigate }) {
       const formData = new FormData();
       formData.append('arquivo', arquivo);
       
-      const res = await fetch('/api/detectar-sistema', {
+      const res = await fetch(`${API_URL}/api/detectar-sistema`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
@@ -296,7 +297,7 @@ function ImportacaoPage({ onNavigate }) {
         formData.append('file', file);
 
         // Escolher endpoint baseado no sistema
-        let endpoint = '/api/importacao/ia/preview-lote';
+        let endpoint = `${API_URL}/api/importacao/ia/preview-lote`;
         
         // Só usa parser Domínio se:
         // 1. Sistema tem parser local (tem_parser = true)
@@ -313,7 +314,7 @@ function ImportacaoPage({ onNavigate }) {
         
         if (usarParserLocal && ehDominio && !ehOutro) {
           // Sistema Domínio confirmado
-          endpoint = '/api/importacao/dominio/preview';
+          endpoint = `${API_URL}/api/importacao/dominio/preview`;
           console.log('[IMPORT] >>> Usando PARSER DOMÍNIO');
         } else {
           console.log('[IMPORT] >>> Usando IA');

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { AlertTriangle, CheckCircle, Loader2, Upload } from 'lucide-react';
 import { Button, Modal } from '../../../components/ui';
 import { useToast } from '../../../contexts/ToastContext';
+import { API_URL } from '../../../config/api';
 
 function UploadModal({ isOpen, onClose, empresaId, onSuccess }) {
   const toast = useToast();
@@ -29,7 +30,7 @@ function UploadModal({ isOpen, onClose, empresaId, onSuccess }) {
       const formData = new FormData();
       formData.append('file', arquivo);
       
-      const res = await fetch(`/api/empresas/${empresaId}/importar/ia/preview`, {
+      const res = await fetch(`${API_URL}/api/empresas/${empresaId}/importar/ia/preview`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` },
         body: formData
@@ -65,7 +66,7 @@ function UploadModal({ isOpen, onClose, empresaId, onSuccess }) {
       formData.append('file', file);
       formData.append('substituir_existentes', substituir ? 'true' : 'false');
       
-      const res = await fetch(`/api/empresas/${empresaId}/importar/ia`, {
+      const res = await fetch(`${API_URL}/api/empresas/${empresaId}/importar/ia`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` },
         body: formData

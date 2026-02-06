@@ -4,6 +4,7 @@ import { Badge, Button, Card } from '../../components/ui';
 import { Header } from '../../components/layout';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
+import { API_URL } from '../../config/api';
 
 function ImportacaoAvancadaPage({ empresaId, onSuccess }) {
   const { api } = useAuth();
@@ -68,7 +69,7 @@ function ImportacaoAvancadaPage({ empresaId, onSuccess }) {
     formData.append('file', file);
     
     try {
-      const res = await fetch(`/api/empresas/${empresaId}/importar/preview`, {
+      const res = await fetch(`${API_URL}/api/empresas/${empresaId}/importar/preview`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
@@ -105,7 +106,7 @@ function ImportacaoAvancadaPage({ empresaId, onSuccess }) {
     formData.append('modo_agregacao', config.modo_agregacao);
     
     try {
-      const res = await fetch(`/api/empresas/${empresaId}/importar`, {
+      const res = await fetch(`${API_URL}/api/empresas/${empresaId}/importar`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
