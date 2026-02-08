@@ -6,7 +6,7 @@ import UploadModal from './components/UploadModal';
 import RegistroModal from './components/RegistroModal';
 import EditEmpresaModal from './components/EditEmpresaModal';
 import React, { useState, useEffect } from 'react';
-import { AlertTriangle, ArrowLeft, BarChart3, Download, PieChart as PieChartIcon, Trash2, Upload } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, BarChart3, ChevronDown, Download, FileText, PieChart as PieChartIcon, Trash2, Upload } from 'lucide-react';
 import { BarChart } from 'recharts';
 import { Button, Card, EmptyState, LoadingOverlay, LoadingScreen, Modal, ScoreCircle, StatusBadge } from '../../components/ui';
 import { Header } from '../../components/layout';
@@ -18,6 +18,8 @@ function EmpresaDetailPage({ empresaId, onNavigate }) {
   const toast = useToast();
   const [empresa, setEmpresa] = useState(null);
   const [registros, setRegistros] = useState([]);
+  const [showPdfMenu, setShowPdfMenu] = useState(false);
+  const [baixandoPdf, setBaixandoPdf] = useState(false);
   const [analises, setAnalises] = useState([]);
   const [ultimaAnalise, setUltimaAnalise] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -159,20 +161,25 @@ function EmpresaDetailPage({ empresaId, onNavigate }) {
     }
   };
 
-  const downloadPDF = async () => {
+  const downloadPDF = async (comParecer = false) => {
     if (!ultimaAnalise) return;
+    setShowPdfMenu(false);
+    setBaixandoPdf(true);
     try {
-      const res = await api(`/empresas/${empresaId}/analises/${ultimaAnalise.id}/pdf`);
+      const params = comParecer ? '?parecer_ia=true' : '';
+      const res = await api(`/empresas/${empresaId}/analises/${ultimaAnalise.id}/pdf${params}`);
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `analise_${empresa?.razao_social || 'empresa'}.pdf`;
+      a.download = `${comParecer ? 'parecer' : 'relatorio'}_${empresa?.razao_social || 'empresa'}.pdf`;
       a.click();
       URL.revokeObjectURL(url);
-      toast.success('PDF baixado com sucesso!');
+      toast.success(comParecer ? 'Parecer consultivo baixado!' : 'Relatório baixado!');
     } catch (err) {
       toast.error('Erro ao baixar PDF');
+    } finally {
+      setBaixandoPdf(false);
     }
   };
 
@@ -251,7 +258,49 @@ function EmpresaDetailPage({ empresaId, onNavigate }) {
                 <p className="text-sm text-slate-500 mt-1">Última análise: {new Date(ultimaAnalise.data_analise).toLocaleDateString('pt-BR')}</p>
               </div>
             </div>
-            <Button variant="secondary" size="sm" onClick={downloadPDF}><Download className="w-4 h-4" /> Baixar PDF</Button>
+            <div className="relative">
+              <Button 
+                variant="secondary" 
+                size="sm" 
+                onClick={() => setShowPdfMenu(!showPdfMenu)}
+                disabled={baixandoPdf}
+                className="flex items-center gap-1.5"
+              >
+                {baixandoPdf ? (
+                  <><div className="w-4 h-4 border-2 border-slate-300 border-t-slate-600 rounded-full animate-spin" /> Gerando...</>
+                ) : (
+                  <><Download className="w-4 h-4" /> Exportar PDF <ChevronDown className="w-3.5 h-3.5" /></>
+                )}
+              </Button>
+              {showPdfMenu && (
+                <>
+                  <div className="fixed inset-0 z-10" onClick={() => setShowPdfMenu(false)} />
+                  <div className="absolute right-0 top-full mt-1 z-20 bg-white rounded-lg shadow-lg border border-slate-200 py-1 w-56">
+                    <button
+                      onClick={() => downloadPDF(false)}
+                      className="w-full text-left px-4 py-2.5 hover:bg-slate-50 flex items-center gap-3 transition-colors"
+                    >
+                      <FileText className="w-4 h-4 text-slate-500" />
+                      <div>
+                        <p className="text-sm font-medium text-slate-700">Relatório Técnico</p>
+                        <p className="text-xs text-slate-400">Indicadores e demonstrativos</p>
+                      </div>
+                    </button>
+                    <div className="border-t border-slate-100 mx-2" />
+                    <button
+                      onClick={() => downloadPDF(true)}
+                      className="w-full text-left px-4 py-2.5 hover:bg-slate-50 flex items-center gap-3 transition-colors"
+                    >
+                      <FileText className="w-4 h-4 text-emerald-500" />
+                      <div>
+                        <p className="text-sm font-medium text-slate-700">Parecer Consultivo</p>
+                        <p className="text-xs text-slate-400">Análise detalhada com recomendações</p>
+                      </div>
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </Card>
       )}

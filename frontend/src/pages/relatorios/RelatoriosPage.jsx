@@ -32,6 +32,7 @@ function RelatoriosPage({ onNavigate }) {
   const [links, setLinks] = useState([]);
   const [loading, setLoading] = useState(false);
   const [gerando, setGerando] = useState(null);
+  const [incluirParecer, setIncluirParecer] = useState(false);
   
   // Modal para criar link
   const [showLinkModal, setShowLinkModal] = useState(false);
@@ -122,7 +123,8 @@ function RelatoriosPage({ onNavigate }) {
     setGerando(tipo);
     
     try {
-      const res = await api(`/empresas/${empresaSelecionada}/relatorios/${tipo}`, {
+      const params = tipo === 'pdf' && incluirParecer ? '?parecer_ia=true' : '';
+      const res = await api(`/empresas/${empresaSelecionada}/relatorios/${tipo}${params}`, {
         method: 'POST'
       });
       
@@ -256,13 +258,22 @@ function RelatoriosPage({ onNavigate }) {
                   </div>
                   <h3 className="font-semibold text-lg mb-2">Relatório PDF</h3>
                   <p className="text-sm text-slate-500 mb-4">Relatório financeiro completo com análises</p>
+                  <label className="flex items-center gap-2 text-sm text-slate-600 mb-3 cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      checked={incluirParecer}
+                      onChange={(e) => setIncluirParecer(e.target.checked)}
+                      className="rounded border-slate-300"
+                    />
+                    <span>Incluir Parecer Consultivo</span>
+                  </label>
                   <Button 
                     onClick={() => gerarRelatorio('pdf')}
                     disabled={gerando === 'pdf'}
                     className="w-full"
                   >
                     {gerando === 'pdf' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-                    {gerando === 'pdf' ? 'Gerando...' : 'Baixar PDF'}
+                    {gerando === 'pdf' ? (incluirParecer ? 'Gerando parecer...' : 'Gerando...') : (incluirParecer ? 'Baixar com Parecer Consultivo' : 'Baixar Relatório Técnico')}
                   </Button>
                 </div>
               </Card>

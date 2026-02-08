@@ -1834,6 +1834,7 @@ async def add_dados(id: int, dados: DadosMensaisFrontend, user: Dict = Depends(g
     }
     
     salvar_dados_mensais(id, dados_dict)
+    _invalidar_cache_empresa(id)
     
     # Gerar alertas automaticamente após salvar dados
     alertas_gerados = 0
@@ -1916,6 +1917,7 @@ async def add_dados_bulk(id: int, dados: DadosBulk, user: Dict = Depends(get_use
         
         for dados_dict in dados_normalizados:
             salvar_dados_mensais(id, dados_dict)
+            _invalidar_cache_empresa(id)
         
         return {
             "ok": True, 
@@ -1930,6 +1932,7 @@ async def add_dados_bulk(id: int, dados: DadosBulk, user: Dict = Depends(get_use
             dados_dict['ano'] = d.ano
             dados_dict['mes'] = d.mes
             salvar_dados_mensais(id, dados_dict)
+            _invalidar_cache_empresa(id)
         return {"ok": True, "salvos": len(dados.dados)}
 
 @app.delete("/empresas/{id}/dados/{ano}/{mes}")
@@ -1937,6 +1940,7 @@ async def del_dados(id: int, ano: int, mes: int, user: Dict = Depends(get_user))
     if not obter_empresa(id, user['id']):
         raise HTTPException(status_code=404, detail="Empresa não encontrada")
     excluir_dados_mensais(id, ano, mes)
+    _invalidar_cache_empresa(id)
     return {"ok": True}
 
 @app.post("/empresas/{id}/dados/upload")
@@ -2001,6 +2005,7 @@ async def confirmar_upload(id: int, dados: UploadConfirm, user: Dict = Depends(g
             else:
                 registros_criados += 1
                 
+        _invalidar_cache_empresa(id)
         return {
             "ok": True, 
             "registros_criados": registros_criados,
@@ -2203,8 +2208,109 @@ async def get_analise_route(id: int, aid: int, user: Dict = Depends(get_user)):
         raise HTTPException(status_code=404, detail="Análise não encontrada")
     return analise
 
+# ══════════════════════════════════════════════════════════════
+# CACHE DE RELATÓRIOS — Funções auxiliares
+# ══════════════════════════════════════════════════════════════
+
+def _init_cache_table():
+    """Cria tabela de cache se não existir."""
+    try:
+        with get_db() as db:
+            from sqlalchemy import text
+            db.execute(text("""
+                CREATE TABLE IF NOT EXISTS relatorios_cache (
+                    id SERIAL PRIMARY KEY,
+                    empresa_id INTEGER NOT NULL,
+                    contador_id INTEGER NOT NULL,
+                    tipo VARCHAR(30) NOT NULL DEFAULT 'pdf',
+                    pdf_bytes BYTEA NOT NULL,
+                    dados_count INTEGER NOT NULL DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(empresa_id, contador_id, tipo)
+                )
+            """))
+            db.commit()
+    except Exception:
+        pass
+
+def _verificar_cache_relatorio(empresa_id: int, contador_id: int, tipo: str):
+    """
+    Retorna bytes do PDF se cache válido, None se precisa regenerar.
+    Cache é invalidado quando há novos dados importados.
+    """
+    try:
+        _init_cache_table()
+        with get_db() as db:
+            from sqlalchemy import text
+            
+            # Quantidade de dados atual
+            count_result = db.execute(text(
+                "SELECT COUNT(*) as total FROM dados_mensais WHERE empresa_id = :eid"
+            ), {"eid": empresa_id}).fetchone()
+            dados_count = count_result.total if count_result else 0
+            
+            # Última importação
+            import_result = db.execute(text(
+                "SELECT MAX(created_at) as ultima FROM dados_mensais WHERE empresa_id = :eid"
+            ), {"eid": empresa_id}).fetchone()
+            
+            # Cache existente
+            cache = db.execute(text("""
+                SELECT pdf_bytes, dados_count, created_at FROM relatorios_cache 
+                WHERE empresa_id = :eid AND contador_id = :cid AND tipo = :tipo
+            """), {"eid": empresa_id, "cid": contador_id, "tipo": tipo}).fetchone()
+            
+            if cache and cache.dados_count == dados_count:
+                import_time = import_result.ultima if import_result else None
+                if import_time is None or cache.created_at > import_time:
+                    logger.info(f"Cache hit: {tipo} empresa {empresa_id}")
+                    return bytes(cache.pdf_bytes) if not isinstance(cache.pdf_bytes, bytes) else cache.pdf_bytes
+    except Exception as e:
+        logger.debug(f"Cache check falhou: {e}")
+    return None
+
+def _salvar_cache_relatorio(empresa_id: int, contador_id: int, tipo: str, pdf_bytes: bytes):
+    """Salva ou atualiza cache do relatório."""
+    try:
+        _init_cache_table()
+        with get_db() as db:
+            from sqlalchemy import text
+            
+            count_result = db.execute(text(
+                "SELECT COUNT(*) as total FROM dados_mensais WHERE empresa_id = :eid"
+            ), {"eid": empresa_id}).fetchone()
+            dados_count = count_result.total if count_result else 0
+            
+            db.execute(text("""
+                INSERT INTO relatorios_cache (empresa_id, contador_id, tipo, pdf_bytes, dados_count, created_at)
+                VALUES (:eid, :cid, :tipo, :pdf_bytes, :dados_count, CURRENT_TIMESTAMP)
+                ON CONFLICT (empresa_id, contador_id, tipo)
+                DO UPDATE SET pdf_bytes = :pdf_bytes, dados_count = :dados_count, created_at = CURRENT_TIMESTAMP
+            """), {
+                "eid": empresa_id, "cid": contador_id, "tipo": tipo,
+                "pdf_bytes": pdf_bytes, "dados_count": dados_count
+            })
+            db.commit()
+            logger.info(f"Cache salvo: {tipo} empresa {empresa_id}")
+    except Exception as e:
+        logger.debug(f"Erro ao salvar cache: {e}")
+
+def _invalidar_cache_empresa(empresa_id: int):
+    """Invalida todo o cache de relatórios de uma empresa."""
+    try:
+        with get_db() as db:
+            from sqlalchemy import text
+            db.execute(text(
+                "DELETE FROM relatorios_cache WHERE empresa_id = :eid"
+            ), {"eid": empresa_id})
+            db.commit()
+            logger.info(f"Cache invalidado: empresa {empresa_id}")
+    except Exception:
+        pass
+
 @app.get("/empresas/{id}/analises/{aid}/pdf")
-async def get_pdf(id: int, aid: int, user: Dict = Depends(get_user)):
+async def get_pdf(id: int, aid: int, user: Dict = Depends(get_user), parecer_ia: bool = False):
+    """PDF de análise específica — usa cache se não houver dados novos."""
     emp = obter_empresa(id, user['id'])
     if not emp:
         raise HTTPException(status_code=404, detail="Empresa não encontrada")
@@ -2212,10 +2318,15 @@ async def get_pdf(id: int, aid: int, user: Dict = Depends(get_user)):
     if not analise:
         raise HTTPException(status_code=404, detail="Análise não encontrada")
     
-    # Obter dados mensais da empresa
     dados_mensais = listar_dados_mensais(id)
+    tipo_cache = 'pdf_parecer' if parecer_ia else 'pdf'
     
-    # Preparar resultado completo para o PDF
+    # Verificar cache
+    pdf_cached = _verificar_cache_relatorio(id, user['id'], tipo_cache)
+    if pdf_cached:
+        return Response(content=pdf_cached, media_type="application/pdf",
+                       headers={"Content-Disposition": f'attachment; filename="analise_{id}_{aid}.pdf"'})
+    
     resultado = {
         'empresa': emp.get('razao_social', 'Empresa'),
         'cnpj': emp.get('cnpj', ''),
@@ -2226,36 +2337,49 @@ async def get_pdf(id: int, aid: int, user: Dict = Depends(get_user)):
         'periodo_fim': analise.get('periodo_fim'),
         'meses_analisados': analise.get('meses_analisados'),
     }
-    
-    # Adicionar dados da análise
     if analise.get('resultado'):
         resultado.update(analise.get('resultado', {}))
     
-    pdf = pdf_generator.generate(resultado)
+    texto_parecer = None
+    if parecer_ia:
+        try:
+            from engine.parecer_ia import gerar_parecer
+            indicadores = pdf_generator.calcular_indicadores_publico(dados_mensais)
+            texto_parecer = gerar_parecer(emp, indicadores)
+        except Exception as e:
+            logger.error(f"Erro ao gerar parecer: {type(e).__name__}")
+    
+    pdf = pdf_generator.generate(resultado, parecer_ia=texto_parecer)
+    _salvar_cache_relatorio(id, user['id'], tipo_cache, pdf)
+    
     return Response(content=pdf, media_type="application/pdf",
                    headers={"Content-Disposition": f'attachment; filename="analise_{id}_{aid}.pdf"'})
 
 @app.get("/empresas/{id}/pdf")
-async def get_ultimo_pdf(id: int, user: Dict = Depends(get_user)):
+async def get_ultimo_pdf(id: int, user: Dict = Depends(get_user), parecer_ia: bool = False):
+    """PDF rápido — usa cache se não houver dados novos."""
     emp = obter_empresa(id, user['id'])
     if not emp:
         raise HTTPException(status_code=404, detail="Empresa não encontrada")
     
-    # Obter dados mensais da empresa
     dados_mensais = listar_dados_mensais(id)
-    
-    # Se não tem dados mensais, retornar erro
     if not dados_mensais:
         raise HTTPException(status_code=404, detail="Nenhum dado financeiro cadastrado. Importe balancetes para gerar o relatório.")
     
-    # Preparar dados para o gerador de PDF
+    tipo_cache = 'pdf_parecer' if parecer_ia else 'pdf'
+    nome_arquivo = emp.get('razao_social', 'empresa')[:20].replace(' ', '_')
+    
+    # Verificar cache
+    pdf_cached = _verificar_cache_relatorio(id, user['id'], tipo_cache)
+    if pdf_cached:
+        return Response(content=pdf_cached, media_type="application/pdf",
+                       headers={"Content-Disposition": f'attachment; filename="relatorio_{nome_arquivo}.pdf"'})
+    
     resultado = {
         'empresa': emp.get('razao_social', 'Empresa'),
         'cnpj': emp.get('cnpj', ''),
         'dados_mensais': dados_mensais,
     }
-    
-    # Se tem análise, adicionar ao resultado incluindo o score
     analise = obter_ultima_analise(id)
     if analise:
         resultado['score'] = analise.get('score')
@@ -2266,8 +2390,18 @@ async def get_ultimo_pdf(id: int, user: Dict = Depends(get_user)):
         if analise.get('resultado'):
             resultado.update(analise.get('resultado', {}))
     
-    pdf = pdf_generator.generate(resultado)
-    nome_arquivo = emp.get('razao_social', 'empresa')[:20].replace(' ', '_')
+    texto_parecer = None
+    if parecer_ia:
+        try:
+            from engine.parecer_ia import gerar_parecer
+            indicadores = pdf_generator.calcular_indicadores_publico(dados_mensais)
+            texto_parecer = gerar_parecer(emp, indicadores)
+        except Exception as e:
+            logger.error(f"Erro ao gerar parecer: {type(e).__name__}")
+    
+    pdf = pdf_generator.generate(resultado, parecer_ia=texto_parecer)
+    _salvar_cache_relatorio(id, user['id'], tipo_cache, pdf)
+    
     return Response(content=pdf, media_type="application/pdf",
                    headers={"Content-Disposition": f'attachment; filename="relatorio_{nome_arquivo}.pdf"'})
 
@@ -2750,6 +2884,7 @@ async def executar_importacao_route(
             ignorar_duplicados=ignorar_duplicados,
             modo_agregacao=modo_agregacao
         )
+        _invalidar_cache_empresa(empresa_id)
         return resultado
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -3062,6 +3197,7 @@ async def importar_arquivo_com_ia(
         logger.debug(f"[API] Método usado: {getattr(resultado, 'metodo_usado', 'ia')}")
         logger.debug(f"[API] Dados: {dados_salvar}")
         salvar_dados_mensais(empresa_id, dados_salvar)
+        _invalidar_cache_empresa(empresa_id)
         logger.debug(f"[API] Dados salvos com sucesso!")
         
         return {
@@ -3446,9 +3582,10 @@ async def listar_templates_relatorio(user: Dict = Depends(get_user)):
 async def gerar_relatorio_pdf(
     empresa_id: int,
     template: str = 'executivo',
+    parecer_ia: bool = False,
     user: Dict = Depends(get_user)
 ):
-    """Gera relatório PDF da empresa com alertas e indicadores expandidos."""
+    """Gera relatório PDF com cache — só regenera se houver novos dados importados."""
     from fastapi.responses import Response
     
     empresa = obter_empresa(empresa_id, user['id'])
@@ -3456,9 +3593,27 @@ async def gerar_relatorio_pdf(
         raise HTTPException(status_code=404, detail="Empresa não encontrada")
     
     dados_mensais = listar_dados_mensais(empresa_id, limite=24)
+    if not dados_mensais:
+        raise HTTPException(status_code=400, detail="Empresa não possui dados mensais para gerar relatório")
+    
+    tipo_cache = 'pdf_parecer' if parecer_ia else 'pdf'
+    
+    # Verificar cache — só regenera se houver novos dados
+    pdf_cached = _verificar_cache_relatorio(empresa_id, user['id'], tipo_cache)
+    if pdf_cached:
+        filename = f"diagnostico_{empresa.get('razao_social', 'empresa').replace(' ', '_')[:30]}.pdf"
+        return Response(
+            content=pdf_cached,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+        )
+    
+    # ══════════════════════════════════════════════════════
+    # GERAR RELATÓRIO (cache miss ou dados novos)
+    # ══════════════════════════════════════════════════════
     ultima_analise = obter_ultima_analise(empresa_id)
     
-    # Buscar alertas da empresa
+    # Buscar alertas
     alertas = []
     try:
         with get_db() as db:
@@ -3475,7 +3630,7 @@ async def gerar_relatorio_pdf(
     except Exception:
         pass
     
-    # Obter configuração white-label (pode não existir a tabela ainda)
+    # Obter configuração white-label
     config = {}
     try:
         with get_db() as db:
@@ -3486,32 +3641,41 @@ async def gerar_relatorio_pdf(
             if result:
                 config = dict(result._mapping)
     except Exception:
-        pass  # Tabela pode não existir
+        pass
     
-    # Preparar dados para o gerador
-    if not dados_mensais:
-        raise HTTPException(status_code=400, detail="Empresa não possui dados mensais para gerar relatório")
+    # Gerar parecer consultivo (se solicitado)
+    texto_parecer = None
+    if parecer_ia:
+        try:
+            from engine.parecer_ia import gerar_parecer
+            from reports.pdf_generator_pro import PDFGeneratorPro
+            indicadores = PDFGeneratorPro().calcular_indicadores_publico(dados_mensais)
+            texto_parecer = gerar_parecer(empresa, indicadores)
+        except Exception as e:
+            logger.error(f"Erro ao gerar parecer: {type(e).__name__}")
     
     try:
-        # Usar novo gerador com alertas
         from reports.pdf_generator_pro import gerar_pdf
         pdf_bytes = gerar_pdf(
             empresa=empresa,
             dados_mensais=dados_mensais,
             analise=ultima_analise,
             config=config,
-            alertas=alertas
+            alertas=alertas,
+            parecer_ia=texto_parecer
         )
     except ImportError as e:
         raise HTTPException(status_code=501, detail=f"Gerador PDF não disponível: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=500, detail="Erro ao gerar relatório")
     
-    # Registrar histórico (criar tabela se não existe)
+    # Salvar no cache
+    _salvar_cache_relatorio(empresa_id, user['id'], tipo_cache, pdf_bytes)
+    
+    # Registrar histórico
     try:
         with get_db() as db:
             from sqlalchemy import text
-            # Criar tabela se não existir
             db.execute(text("""
                 CREATE TABLE IF NOT EXISTS historico_relatorios (
                     id SERIAL PRIMARY KEY,
@@ -5432,6 +5596,7 @@ async def importar_balancete_e_salvar_route(
                 dados_salvar['mes'] = resultado.mes
             
             salvar_dados_mensais(empresa_id, dados_salvar)
+            _invalidar_cache_empresa(empresa_id)
         
         return {
             "sucesso": True,
@@ -5833,6 +5998,7 @@ async def confirmar_importacao_revisada(
         
         # salvar_dados_mensais já faz upsert (insert ou update)
         resultado = salvar_dados_mensais(empresa_id, dados_financeiros)
+        _invalidar_cache_empresa(empresa_id)
         
         return {
             "sucesso": True,
