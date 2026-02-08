@@ -6,38 +6,34 @@ import UploadModal from './components/UploadModal';
 import RegistroModal from './components/RegistroModal';
 import EditEmpresaModal from './components/EditEmpresaModal';
 import React, { useState, useEffect } from 'react';
-import { AlertTriangle, ArrowLeft, BarChart3, ChevronDown, Download, FileText, PieChart as PieChartIcon, Trash2, Upload } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, ChevronDown, Download, FileText, PieChart as PieChartIcon, Trash2, Upload, BarChart3 } from 'lucide-react';
 import { BarChart } from 'recharts';
 import { Button, Card, EmptyState, LoadingOverlay, LoadingScreen, Modal, ScoreCircle, StatusBadge } from '../../components/ui';
 import { Header } from '../../components/layout';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
+import { useExport } from '../../contexts/ExportContext';
 
 function EmpresaDetailPage({ empresaId, onNavigate }) {
   const { api } = useAuth();
   const toast = useToast();
+  const { agendarExportacao } = useExport();
   const [empresa, setEmpresa] = useState(null);
   const [registros, setRegistros] = useState([]);
   const [showPdfMenu, setShowPdfMenu] = useState(false);
-  const [baixandoPdf, setBaixandoPdf] = useState(false);
   const [analises, setAnalises] = useState([]);
   const [ultimaAnalise, setUltimaAnalise] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [analisando, setAnalisando] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
   const [showRegistro, setShowRegistro] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [tab, setTab] = useState('visao-geral');
-  const [temNovosDados, setTemNovosDados] = useState(false); // Controla se há novos dados desde última análise
-  const [dataUltimoLoad, setDataUltimoLoad] = useState(null); // Controla quando foi o último load
 
   // Recarregar dados sempre que a página for acessada (não apenas quando empresaId muda)
   useEffect(() => { 
     loadData(); 
-    // Marcar timestamp do load para debug
-    setDataUltimoLoad(new Date().toISOString());
   }, [empresaId]);
   
   // Também recarregar quando o usuário volta para esta página (foco na janela)
@@ -67,60 +63,13 @@ function EmpresaDetailPage({ empresaId, onNavigate }) {
       }
       if (regRes.ok) {
         const regData = await regRes.json();
-        const dadosList = regData.dados || regData || [];
-        setRegistros(dadosList);
-        
-        console.log('[EMPRESA] Dados carregados:', dadosList.length, 'registros');
-        
-        // Verificar se há dados mais recentes que a última análise
-        if (anaRes.ok) {
-          const anaData = await anaRes.json();
-          const analisesList = anaData.analises || anaData || [];
-          setAnalises(analisesList);
-          
-          if (analisesList.length > 0) {
-            setUltimaAnalise(analisesList[0]);
-            const dataUltimaAnalise = new Date(analisesList[0].data_analise);
-            
-            console.log('[EMPRESA] Última análise em:', analisesList[0].data_analise);
-            
-            // Verificar se algum dado foi criado/atualizado após a última análise
-            const temDadosNovos = dadosList.some(d => {
-              // Usar updated_at se disponível, senão created_at
-              const dataStr = d.updated_at || d.created_at;
-              if (!dataStr) {
-                console.log(`[EMPRESA] Dado ${d.competencia} sem data de criação/atualização`);
-                return false;
-              }
-              const dataAtualizacao = new Date(dataStr);
-              const isNovo = dataAtualizacao > dataUltimaAnalise;
-              if (isNovo) {
-                console.log(`[EMPRESA] ✓ Dado ${d.competencia} é mais recente:`, dataStr);
-              }
-              return isNovo;
-            });
-            
-            // Também verificar se há mais registros do que na última análise
-            // (caso os timestamps não estejam disponíveis)
-            const qtdMesesAnalise = analisesList[0].meses_analisados || 0;
-            const temMaisRegistros = dadosList.length > qtdMesesAnalise;
-            
-            const deveHabilitar = temDadosNovos || temMaisRegistros;
-            console.log(`[EMPRESA] Tem dados novos: ${temDadosNovos}, tem mais registros: ${temMaisRegistros} (${dadosList.length} vs ${qtdMesesAnalise})`);
-            
-            setTemNovosDados(deveHabilitar);
-          } else {
-            // Nunca fez análise, pode analisar se tem dados
-            console.log('[EMPRESA] Nenhuma análise anterior, habilitando botão');
-            setTemNovosDados(dadosList.length > 0);
-          }
-        }
-      } else if (anaRes.ok) {
+        setRegistros(regData.dados || regData || []);
+      }
+      if (anaRes.ok) {
         const anaData = await anaRes.json();
         const analisesList = anaData.analises || anaData || [];
         setAnalises(analisesList);
         if (analisesList.length > 0) setUltimaAnalise(analisesList[0]);
-        setTemNovosDados(analisesList.length === 0);
       }
     } catch (err) {
       toast.error('Erro ao carregar dados da empresa');
@@ -131,56 +80,16 @@ function EmpresaDetailPage({ empresaId, onNavigate }) {
   
   // Callback quando importação é bem sucedida
   const handleImportSuccess = () => {
-    setTemNovosDados(true);
     loadData();
   };
 
-  const executarAnalise = async () => {
-    if (registros.length < 3) {
-      toast.warning('Necessário pelo menos 3 meses de dados para análise');
-      return;
-    }
-    
-    setAnalisando(true);
-    try {
-      const res = await api(`/empresas/${empresaId}/analises`, { method: 'POST' });
-      if (res.ok) {
-        const result = await res.json();
-        toast.success('Análise concluída com sucesso!');
-        setTemNovosDados(false); // Análise feita, desabilita botão
-        await loadData();
-        setTab('analise');
-      } else {
-        const err = await res.json();
-        toast.error(err.detail || 'Erro ao executar análise');
-      }
-    } catch (err) {
-      toast.error('Erro de conexão ao executar análise');
-    } finally {
-      setAnalisando(false);
-    }
-  };
 
-  const downloadPDF = async (comParecer = false) => {
+
+  const exportarPDF = (comParecer = false) => {
     if (!ultimaAnalise) return;
     setShowPdfMenu(false);
-    setBaixandoPdf(true);
-    try {
-      const params = comParecer ? '?parecer_ia=true' : '';
-      const res = await api(`/empresas/${empresaId}/analises/${ultimaAnalise.id}/pdf${params}`);
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${comParecer ? 'parecer' : 'relatorio'}_${empresa?.razao_social || 'empresa'}.pdf`;
-      a.click();
-      URL.revokeObjectURL(url);
-      toast.success(comParecer ? 'Parecer consultivo baixado!' : 'Relatório baixado!');
-    } catch (err) {
-      toast.error('Erro ao baixar PDF');
-    } finally {
-      setBaixandoPdf(false);
-    }
+    const tipo = comParecer ? 'pdf_parecer' : 'pdf';
+    agendarExportacao(empresaId, tipo, empresa?.razao_social || 'Empresa');
   };
 
   const handleDelete = async () => {
@@ -214,7 +123,6 @@ function EmpresaDetailPage({ empresaId, onNavigate }) {
 
   return (
     <div>
-      {analisando && <LoadingOverlay message="Executando análise financeira..." />}
       <Header 
         title={empresa.razao_social}
         subtitle={empresa.cnpj}
@@ -229,21 +137,7 @@ function EmpresaDetailPage({ empresaId, onNavigate }) {
             >
               <PieChartIcon className="w-4 h-4" /> DRE & Índices
             </Button>
-            <div className="relative group">
-              <Button 
-                onClick={executarAnalise} 
-                loading={analisando} 
-                disabled={registros.length < 3 || (!temNovosDados && ultimaAnalise)}
-              >
-                <BarChart3 className="w-4 h-4" /> Analisar
-              </Button>
-              {!temNovosDados && ultimaAnalise && registros.length >= 3 && (
-                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-2 bg-slate-800 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10">
-                  Importe novos dados para analisar novamente
-                  <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-800"></div>
-                </div>
-              )}
-            </div>
+
           </div>
         }
       />
@@ -263,21 +157,17 @@ function EmpresaDetailPage({ empresaId, onNavigate }) {
                 variant="secondary" 
                 size="sm" 
                 onClick={() => setShowPdfMenu(!showPdfMenu)}
-                disabled={baixandoPdf}
+                
                 className="flex items-center gap-1.5"
               >
-                {baixandoPdf ? (
-                  <><div className="w-4 h-4 border-2 border-slate-300 border-t-slate-600 rounded-full animate-spin" /> Gerando...</>
-                ) : (
-                  <><Download className="w-4 h-4" /> Exportar PDF <ChevronDown className="w-3.5 h-3.5" /></>
-                )}
+                <><Download className="w-4 h-4" /> Exportar PDF <ChevronDown className="w-3.5 h-3.5" /></>
               </Button>
               {showPdfMenu && (
                 <>
                   <div className="fixed inset-0 z-10" onClick={() => setShowPdfMenu(false)} />
                   <div className="absolute right-0 top-full mt-1 z-20 bg-white rounded-lg shadow-lg border border-slate-200 py-1 w-56">
                     <button
-                      onClick={() => downloadPDF(false)}
+                      onClick={() => exportarPDF(false)}
                       className="w-full text-left px-4 py-2.5 hover:bg-slate-50 flex items-center gap-3 transition-colors"
                     >
                       <FileText className="w-4 h-4 text-slate-500" />
@@ -288,7 +178,7 @@ function EmpresaDetailPage({ empresaId, onNavigate }) {
                     </button>
                     <div className="border-t border-slate-100 mx-2" />
                     <button
-                      onClick={() => downloadPDF(true)}
+                      onClick={() => exportarPDF(true)}
                       className="w-full text-left px-4 py-2.5 hover:bg-slate-50 flex items-center gap-3 transition-colors"
                     >
                       <FileText className="w-4 h-4 text-emerald-500" />
@@ -321,9 +211,8 @@ function EmpresaDetailPage({ empresaId, onNavigate }) {
       {tab === 'analise' && ultimaAnalise && <AnaliseDetail analise={ultimaAnalise} />}
       {tab === 'analise' && !ultimaAnalise && (
         <Card className="p-8">
-          <EmptyState icon={BarChart3} title="Nenhuma análise realizada"
-            description={registros.length < 3 ? "Cadastre pelo menos 3 meses de dados para análise" : "Execute uma análise para ver o diagnóstico"}
-            action={<Button onClick={executarAnalise} disabled={registros.length < 3} loading={analisando}><BarChart3 className="w-4 h-4" /> Executar Análise</Button>}
+          <EmptyState icon={BarChart3} title="Nenhuma análise disponível"
+            description={registros.length < 3 ? "Importe pelo menos 3 meses de dados — a análise será gerada automaticamente" : "A análise será gerada automaticamente após a importação de dados"}
           />
         </Card>
       )}

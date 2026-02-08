@@ -5,9 +5,10 @@ import { Loader2, CheckCircle, AlertTriangle } from 'lucide-react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { ToastProvider } from './contexts/ToastContext';
+import { ExportProvider } from './contexts/ExportContext';
 
 // Layout
-import { Sidebar } from './components/layout';
+import { Sidebar, ExportPanel } from './components/layout';
 import { LoadingScreen } from './components/ui';
 
 // Pages
@@ -148,10 +149,13 @@ function AppContent() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <Sidebar currentPage={page} onNavigate={navigate} collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
-      <main className={`transition-all ${sidebarCollapsed ? 'ml-16' : 'ml-64'} p-6`}>{renderPage()}</main>
-    </div>
+    <ExportProvider>
+      <div className="min-h-screen bg-slate-50">
+        <Sidebar currentPage={page} onNavigate={navigate} collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
+        <main className={`transition-all ${sidebarCollapsed ? 'ml-16' : 'ml-64'} p-6`}>{renderPage()}</main>
+        <ExportPanel />
+      </div>
+    </ExportProvider>
   );
 }
 

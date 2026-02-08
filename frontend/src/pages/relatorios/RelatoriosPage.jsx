@@ -1,14 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { Check, Download, FileSpreadsheet, FileText, Loader2, Plus, X, PieChart as PieChartIcon } from 'lucide-react';
+import { Check, Download, FileSpreadsheet, FileText, Plus, X, PieChart as PieChartIcon } from 'lucide-react';
 import { Button, Card, EmptyState, LoadingScreen, Modal } from '../../components/ui';
 import { Header } from '../../components/layout';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useToast } from '../../contexts/ToastContext';
+import { useExport } from '../../contexts/ExportContext';
 
 function RelatoriosPage({ onNavigate }) {
   const { api } = useAuth();
   const toast = useToast();
+  const { agendarExportacao } = useExport();
   const themeCtx = useTheme();
   
   const [activeTab, setActiveTab] = useState('gerar');
@@ -31,7 +33,6 @@ function RelatoriosPage({ onNavigate }) {
   const [historico, setHistorico] = useState([]);
   const [links, setLinks] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [gerando, setGerando] = useState(null);
   const [incluirParecer, setIncluirParecer] = useState(false);
   
   // Modal para criar link
@@ -120,40 +121,11 @@ function RelatoriosPage({ onNavigate }) {
       return;
     }
     
-    setGerando(tipo);
+    const empresa = empresas.find(e => e.id === empresaSelecionada);
+    const empresaNome = empresa?.razao_social || 'Empresa';
     
-    try {
-      const params = tipo === 'pdf' && incluirParecer ? '?parecer_ia=true' : '';
-      const res = await api(`/empresas/${empresaSelecionada}/relatorios/${tipo}${params}`, {
-        method: 'POST'
-      });
-      
-      if (res.ok) {
-        const blob = await res.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        
-        const extensoes = { pdf: 'pdf', excel: 'xlsx', pptx: 'pptx' };
-        const empresa = empresas.find(e => e.id === empresaSelecionada);
-        a.download = `relatorio_${empresa?.razao_social?.substring(0, 20) || 'empresa'}.${extensoes[tipo]}`;
-        
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        window.URL.revokeObjectURL(url);
-        
-        toast.success(`Relatório ${tipo.toUpperCase()} gerado!`);
-        loadData(); // Atualiza histórico
-      } else {
-        const err = await res.json();
-        toast.error(err.detail || 'Erro ao gerar relatório');
-      }
-    } catch (err) {
-      toast.error('Erro ao gerar relatório');
-    } finally {
-      setGerando(null);
-    }
+    const tipoExport = tipo === 'pdf' && incluirParecer ? 'pdf_parecer' : tipo;
+    agendarExportacao(empresaSelecionada, tipoExport, empresaNome);
   };
 
   const criarLink = async () => {
@@ -269,11 +241,10 @@ function RelatoriosPage({ onNavigate }) {
                   </label>
                   <Button 
                     onClick={() => gerarRelatorio('pdf')}
-                    disabled={gerando === 'pdf'}
                     className="w-full"
                   >
-                    {gerando === 'pdf' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-                    {gerando === 'pdf' ? (incluirParecer ? 'Gerando parecer...' : 'Gerando...') : (incluirParecer ? 'Baixar com Parecer Consultivo' : 'Baixar Relatório Técnico')}
+                    <Download className="w-4 h-4" />
+                    {incluirParecer ? 'Exportar Parecer Consultivo' : 'Exportar Relatório Técnico'}
                   </Button>
                 </div>
               </Card>
@@ -288,12 +259,11 @@ function RelatoriosPage({ onNavigate }) {
                   <p className="text-sm text-slate-500 mb-4">Dados e indicadores em formato editável</p>
                   <Button 
                     onClick={() => gerarRelatorio('excel')}
-                    disabled={gerando === 'excel'}
                     variant="secondary"
                     className="w-full"
                   >
-                    {gerando === 'excel' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-                    {gerando === 'excel' ? 'Gerando...' : 'Baixar Excel'}
+                    <Download className="w-4 h-4" />
+                    Exportar Excel
                   </Button>
                 </div>
               </Card>
@@ -308,12 +278,11 @@ function RelatoriosPage({ onNavigate }) {
                   <p className="text-sm text-slate-500 mb-4">Slides prontos para apresentar ao cliente</p>
                   <Button 
                     onClick={() => gerarRelatorio('pptx')}
-                    disabled={gerando === 'pptx'}
                     variant="secondary"
                     className="w-full"
                   >
-                    {gerando === 'pptx' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-                    {gerando === 'pptx' ? 'Gerando...' : 'Baixar PPTX'}
+                    <Download className="w-4 h-4" />
+                    Exportar Apresentação
                   </Button>
                 </div>
               </Card>

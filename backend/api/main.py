@@ -17,7 +17,7 @@ from dataclasses import asdict
 import json
 import numpy as np
 
-from fastapi import FastAPI, HTTPException, Depends, Header, UploadFile, File, Form, Request
+from fastapi import FastAPI, HTTPException, Depends, Header, UploadFile, File, Form, Request, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, JSONResponse
 from pydantic import BaseModel, EmailStr, Field
@@ -1835,6 +1835,7 @@ async def add_dados(id: int, dados: DadosMensaisFrontend, user: Dict = Depends(g
     
     salvar_dados_mensais(id, dados_dict)
     _invalidar_cache_empresa(id)
+    _executar_analise_auto(id, user['id'])
     
     # Gerar alertas automaticamente após salvar dados
     alertas_gerados = 0
@@ -1918,6 +1919,7 @@ async def add_dados_bulk(id: int, dados: DadosBulk, user: Dict = Depends(get_use
         for dados_dict in dados_normalizados:
             salvar_dados_mensais(id, dados_dict)
             _invalidar_cache_empresa(id)
+            _executar_analise_auto(id, user['id'])
         
         return {
             "ok": True, 
@@ -1933,6 +1935,7 @@ async def add_dados_bulk(id: int, dados: DadosBulk, user: Dict = Depends(get_use
             dados_dict['mes'] = d.mes
             salvar_dados_mensais(id, dados_dict)
             _invalidar_cache_empresa(id)
+            _executar_analise_auto(id, user['id'])
         return {"ok": True, "salvos": len(dados.dados)}
 
 @app.delete("/empresas/{id}/dados/{ano}/{mes}")
@@ -2006,6 +2009,7 @@ async def confirmar_upload(id: int, dados: UploadConfirm, user: Dict = Depends(g
                 registros_criados += 1
                 
         _invalidar_cache_empresa(id)
+        _executar_analise_auto(id, user['id'])
         return {
             "ok": True, 
             "registros_criados": registros_criados,
@@ -2308,6 +2312,125 @@ def _invalidar_cache_empresa(empresa_id: int):
     except Exception:
         pass
 
+def _executar_analise_auto(empresa_id: int, contador_id: int):
+    """Executa análise financeira automaticamente após importação de dados.
+    Silencioso — nunca levanta exceção."""
+    try:
+        dados_db = obter_dados_para_analise(empresa_id)
+        if len(dados_db) < 3:
+            return  # Dados insuficientes
+        
+        from engine.analyzer_profissional import executar_analise as executar_analise_pro
+        
+        dados_mensais = []
+        for d in dados_db:
+            icms_valor = d.get('icms') or d.get('icms_deducao') or 0
+            pis_valor = d.get('pis') or d.get('pis_deducao') or 0
+            cofins_valor = d.get('cofins') or d.get('cofins_deducao') or 0
+            irpj_valor = d.get('irpj') or d.get('irpj_deducao') or 0
+            csll_valor = d.get('csll') or d.get('csll_deducao') or 0
+            iss_valor = d.get('iss') or d.get('iss_deducao') or 0
+            soma_impostos_individuais = icms_valor + pis_valor + cofins_valor + irpj_valor + csll_valor + iss_valor
+            impostos_campo = d.get('impostos') or d.get('impostos_total') or d.get('deducoes_receita') or 0
+            if icms_valor == 0 and impostos_campo > soma_impostos_individuais and soma_impostos_individuais > 0:
+                icms_valor = impostos_campo - soma_impostos_individuais
+                soma_impostos_individuais = impostos_campo
+            impostos_valor = max(soma_impostos_individuais, impostos_campo)
+            
+            item = {
+                'competencia': f"{d['ano']}-{d['mes']:02d}",
+                'receita_bruta': d.get('receita_bruta') or d.get('receita') or 0,
+                'custos_total': d.get('custos_total') or d.get('custos') or 0,
+                'despesas_operacionais': d.get('despesas_operacionais') or d.get('despesas') or 0,
+                'impostos': impostos_valor,
+                'impostos_total': impostos_valor,
+                'folha_pagamento': d.get('folha') or 0,
+                'disponivel': d.get('disponivel') or d.get('caixa') or 0,
+                'lucro_liquido': d.get('lucro_liquido') or ((d.get('receita') or 0) - (d.get('custos') or 0) - (d.get('despesas') or 0) - (d.get('impostos') or 0)),
+                'ativo_total': d.get('ativo_total') or 0,
+                'ativo_circulante': d.get('ativo_circulante') or 0,
+                'bancos': d.get('bancos') or 0,
+                'caixa': d.get('caixa') or 0,
+                'clientes': d.get('clientes') or 0,
+                'estoques': d.get('estoques') or 0,
+                'passivo_total': d.get('passivo_total') or 0,
+                'passivo_circulante': d.get('passivo_circulante') or 0,
+                'passivo_nao_circulante': d.get('passivo_nao_circulante') or 0,
+                'patrimonio_liquido': d.get('patrimonio_liquido') or d.get('capital_social') or 0,
+                'capital_social': d.get('capital_social') or 0,
+                'receita_servicos': d.get('receita_servicos') or 0,
+                'deducoes_receita': d.get('deducoes_receita') or 0,
+                'despesas_financeiras': d.get('despesas_financeiras') or 0,
+                'receitas_financeiras': d.get('receitas_financeiras') or 0,
+                'icms_deducao': icms_valor, 'icms': icms_valor,
+                'iss_deducao': iss_valor, 'iss': iss_valor,
+                'pis_deducao': pis_valor, 'pis': pis_valor,
+                'cofins_deducao': cofins_valor, 'cofins': cofins_valor,
+                'irpj_deducao': irpj_valor, 'irpj': irpj_valor,
+                'csll_deducao': csll_valor, 'csll': csll_valor,
+            }
+            dados_mensais.append(item)
+        
+        emp = None
+        try:
+            with get_db() as db:
+                from sqlalchemy import text
+                r = db.execute(text("SELECT * FROM empresas WHERE id = :id"), {"id": empresa_id}).fetchone()
+                if r: emp = dict(r._mapping)
+        except Exception:
+            pass
+        
+        resultado = executar_analise_pro(
+            dados_mensais=dados_mensais,
+            empresa_id=empresa_id,
+            empresa_nome=emp.get('razao_social', '') if emp else ''
+        )
+        
+        salvar_analise(empresa_id, resultado)
+        logger.info(f"Análise automática concluída: empresa {empresa_id}")
+        
+        # Gerar alertas automaticamente
+        try:
+            from engine.alertas import gerar_alertas_empresa
+            dados_para_alertas = listar_dados_mensais(empresa_id, limite=24)
+            alertas = gerar_alertas_empresa(
+                empresa=emp or {},
+                dados_mensais=dados_para_alertas,
+                analise_atual={'resultado_completo': resultado}
+            )
+            with get_db() as db:
+                from sqlalchemy import text
+                db.execute(text("""
+                    DELETE FROM alertas WHERE empresa_id = :eid AND contador_id = :cid AND resolvido = false
+                """), {"eid": empresa_id, "cid": contador_id})
+                for alerta in alertas:
+                    db.execute(text("""
+                        INSERT INTO alertas (
+                            empresa_id, contador_id, tipo, severidade, codigo,
+                            titulo, mensagem, valor_atual, valor_limite, valor_anterior,
+                            dados_json, periodo_referencia
+                        ) VALUES (
+                            :empresa_id, :contador_id, :tipo, :severidade, :codigo,
+                            :titulo, :mensagem, :valor_atual, :valor_limite, :valor_anterior,
+                            :dados_json, :periodo_referencia
+                        )
+                    """), {
+                        "empresa_id": empresa_id, "contador_id": contador_id,
+                        "tipo": alerta.get('tipo'), "severidade": alerta.get('severidade'),
+                        "codigo": alerta.get('codigo'), "titulo": alerta.get('titulo'),
+                        "mensagem": alerta.get('mensagem'), "valor_atual": alerta.get('valor_atual'),
+                        "valor_limite": alerta.get('valor_limite'), "valor_anterior": alerta.get('valor_anterior'),
+                        "dados_json": alerta.get('dados_json'), "periodo_referencia": alerta.get('periodo_referencia')
+                    })
+                db.commit()
+        except Exception as e:
+            logger.debug(f"Alertas automáticos: {e}")
+    
+    except ImportError:
+        logger.debug("analyzer_profissional não disponível para análise automática")
+    except Exception as e:
+        logger.info(f"Análise automática falhou (empresa {empresa_id}): {e}")
+
 @app.get("/empresas/{id}/analises/{aid}/pdf")
 async def get_pdf(id: int, aid: int, user: Dict = Depends(get_user), parecer_ia: bool = False):
     """PDF de análise específica — usa cache se não houver dados novos."""
@@ -2344,7 +2467,7 @@ async def get_pdf(id: int, aid: int, user: Dict = Depends(get_user), parecer_ia:
     if parecer_ia:
         try:
             from engine.parecer_ia import gerar_parecer
-            indicadores = pdf_generator.calcular_indicadores_publico(dados_mensais)
+            indicadores = pdf_generator.calcular_indicadores_com_analise(dados_mensais, analise)
             texto_parecer = gerar_parecer(emp, indicadores)
         except Exception as e:
             logger.error(f"Erro ao gerar parecer: {type(e).__name__}")
@@ -2394,7 +2517,7 @@ async def get_ultimo_pdf(id: int, user: Dict = Depends(get_user), parecer_ia: bo
     if parecer_ia:
         try:
             from engine.parecer_ia import gerar_parecer
-            indicadores = pdf_generator.calcular_indicadores_publico(dados_mensais)
+            indicadores = pdf_generator.calcular_indicadores_com_analise(dados_mensais, analise)
             texto_parecer = gerar_parecer(emp, indicadores)
         except Exception as e:
             logger.error(f"Erro ao gerar parecer: {type(e).__name__}")
@@ -2885,6 +3008,7 @@ async def executar_importacao_route(
             modo_agregacao=modo_agregacao
         )
         _invalidar_cache_empresa(empresa_id)
+        _executar_analise_auto(empresa_id, user['id'])
         return resultado
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -3198,6 +3322,7 @@ async def importar_arquivo_com_ia(
         logger.debug(f"[API] Dados: {dados_salvar}")
         salvar_dados_mensais(empresa_id, dados_salvar)
         _invalidar_cache_empresa(empresa_id)
+        _executar_analise_auto(empresa_id, user['id'])
         logger.debug(f"[API] Dados salvos com sucesso!")
         
         return {
@@ -3645,12 +3770,13 @@ async def gerar_relatorio_pdf(
     
     # Gerar parecer consultivo (se solicitado)
     texto_parecer = None
+    indicadores_calculados = None
     if parecer_ia:
         try:
             from engine.parecer_ia import gerar_parecer
             from reports.pdf_generator_pro import PDFGeneratorPro
-            indicadores = PDFGeneratorPro().calcular_indicadores_publico(dados_mensais)
-            texto_parecer = gerar_parecer(empresa, indicadores)
+            indicadores_calculados = PDFGeneratorPro().calcular_indicadores_com_analise(dados_mensais, ultima_analise)
+            texto_parecer = gerar_parecer(empresa, indicadores_calculados)
         except Exception as e:
             logger.error(f"Erro ao gerar parecer: {type(e).__name__}")
     
@@ -3662,7 +3788,8 @@ async def gerar_relatorio_pdf(
             analise=ultima_analise,
             config=config,
             alertas=alertas,
-            parecer_ia=texto_parecer
+            parecer_ia=texto_parecer,
+            indicadores=indicadores_calculados
         )
     except ImportError as e:
         raise HTTPException(status_code=501, detail=f"Gerador PDF não disponível: {str(e)}")
@@ -3905,6 +4032,370 @@ async def gerar_relatorio_pptx(
         media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'}
     )
+
+
+# ══════════════════════════════════════════════════════════════
+# EXPORTAÇÕES ASSÍNCRONAS
+# ══════════════════════════════════════════════════════════════
+
+def _init_exportacoes_table():
+    """Cria tabela de exportações se não existir."""
+    try:
+        with get_db() as db:
+            from sqlalchemy import text
+            db.execute(text("""
+                CREATE TABLE IF NOT EXISTS exportacoes (
+                    id SERIAL PRIMARY KEY,
+                    empresa_id INTEGER NOT NULL,
+                    contador_id INTEGER NOT NULL,
+                    tipo VARCHAR(30) NOT NULL DEFAULT 'pdf',
+                    status VARCHAR(20) NOT NULL DEFAULT 'pendente',
+                    empresa_nome VARCHAR(255),
+                    arquivo BYTEA,
+                    erro TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    completed_at TIMESTAMP
+                )
+            """))
+            db.commit()
+    except Exception:
+        pass
+
+def _processar_exportacao(exportacao_id: int):
+    """Processa uma exportação em background."""
+    import time
+    try:
+        with get_db() as db:
+            from sqlalchemy import text
+            
+            # Marcar como processando
+            db.execute(text("""
+                UPDATE exportacoes SET status = 'processando' WHERE id = :id
+            """), {"id": exportacao_id})
+            db.commit()
+            
+            # Buscar dados da exportação
+            exp = db.execute(text("""
+                SELECT * FROM exportacoes WHERE id = :id
+            """), {"id": exportacao_id}).fetchone()
+            
+            if not exp:
+                return
+            
+            exp = dict(exp._mapping)
+            empresa_id = exp['empresa_id']
+            contador_id = exp['contador_id']
+            tipo = exp['tipo']
+            
+            # Buscar empresa
+            empresa = db.execute(text("""
+                SELECT * FROM empresas WHERE id = :id AND contador_id = :cid
+            """), {"id": empresa_id, "cid": contador_id}).fetchone()
+            
+            if not empresa:
+                db.execute(text("""
+                    UPDATE exportacoes SET status = 'erro', erro = 'Empresa não encontrada', completed_at = CURRENT_TIMESTAMP WHERE id = :id
+                """), {"id": exportacao_id})
+                db.commit()
+                return
+            
+            empresa = dict(empresa._mapping)
+        
+        # Buscar dados mensais
+        dados_mensais = listar_dados_mensais(empresa_id, limite=24)
+        if not dados_mensais:
+            with get_db() as db:
+                from sqlalchemy import text
+                db.execute(text("""
+                    UPDATE exportacoes SET status = 'erro', erro = 'Sem dados financeiros', completed_at = CURRENT_TIMESTAMP WHERE id = :id
+                """), {"id": exportacao_id})
+                db.commit()
+            return
+        
+        ultima_analise = obter_ultima_analise(empresa_id)
+        
+        # Verificar cache primeiro (só para PDF)
+        if tipo in ('pdf', 'pdf_parecer'):
+            cached = _verificar_cache_relatorio(empresa_id, contador_id, tipo)
+            if cached:
+                with get_db() as db:
+                    from sqlalchemy import text
+                    db.execute(text("""
+                        UPDATE exportacoes SET status = 'concluido', arquivo = :arquivo, completed_at = CURRENT_TIMESTAMP WHERE id = :id
+                    """), {"id": exportacao_id, "arquivo": cached})
+                    db.commit()
+                return
+        
+        # Buscar alertas
+        alertas = []
+        try:
+            with get_db() as db:
+                from sqlalchemy import text
+                results = db.execute(text("""
+                    SELECT * FROM alertas WHERE empresa_id = :eid AND contador_id = :cid
+                    ORDER BY CASE severidade WHEN 'critico' THEN 1 WHEN 'atencao' THEN 2 ELSE 3 END
+                    LIMIT 20
+                """), {"eid": empresa_id, "cid": contador_id}).fetchall()
+                alertas = [dict(r._mapping) for r in results]
+        except Exception:
+            pass
+        
+        # Config white-label
+        config = {}
+        try:
+            with get_db() as db:
+                from sqlalchemy import text
+                result = db.execute(text("""
+                    SELECT * FROM configuracoes_relatorio WHERE contador_id = :cid
+                """), {"cid": contador_id}).fetchone()
+                if result:
+                    config = dict(result._mapping)
+        except Exception:
+            pass
+        
+        arquivo_bytes = None
+        
+        # ── PDF / PDF com Parecer ──
+        if tipo in ('pdf', 'pdf_parecer'):
+            texto_parecer = None
+            indicadores_calculados = None
+            if tipo == 'pdf_parecer':
+                try:
+                    from engine.parecer_ia import gerar_parecer
+                    from reports.pdf_generator_pro import PDFGeneratorPro
+                    indicadores_calculados = PDFGeneratorPro(config).calcular_indicadores_com_analise(dados_mensais, ultima_analise)
+                    texto_parecer = gerar_parecer(empresa, indicadores_calculados)
+                except Exception as e:
+                    logger.error(f"Erro ao gerar parecer: {type(e).__name__}")
+            
+            from reports.pdf_generator_pro import gerar_pdf
+            arquivo_bytes = gerar_pdf(
+                empresa=empresa,
+                dados_mensais=dados_mensais,
+                analise=ultima_analise,
+                config=config,
+                alertas=alertas,
+                parecer_ia=texto_parecer,
+                indicadores=indicadores_calculados
+            )
+            _salvar_cache_relatorio(empresa_id, contador_id, tipo, arquivo_bytes)
+        
+        # ── Excel ──
+        elif tipo == 'excel':
+            try:
+                from reports.excel_generator import gerar_excel
+                arquivo_bytes = gerar_excel(
+                    empresa=empresa,
+                    dados_mensais=dados_mensais,
+                    analise=ultima_analise,
+                    config=config,
+                    alertas=alertas
+                )
+            except ImportError:
+                # Fallback simples com openpyxl
+                import openpyxl
+                from io import BytesIO
+                wb = openpyxl.Workbook()
+                ws = wb.active
+                ws.title = "Dados Financeiros"
+                headers = ['Mês/Ano', 'Receita', 'Custos', 'Despesas', 'Impostos', 'Folha', 'Caixa']
+                ws.append(headers)
+                for d in dados_mensais:
+                    ws.append([
+                        f"{d.get('mes', '')}/{d.get('ano', '')}",
+                        d.get('receita', 0), d.get('custos', 0), d.get('despesas', 0),
+                        d.get('impostos', 0), d.get('folha', 0), d.get('caixa', 0)
+                    ])
+                buf = BytesIO()
+                wb.save(buf)
+                arquivo_bytes = buf.getvalue()
+        
+        # ── PPTX ──
+        elif tipo == 'pptx':
+            try:
+                from reports.pptx_generator import gerar_pptx
+                arquivo_bytes = gerar_pptx(
+                    empresa=empresa,
+                    dados_mensais=dados_mensais,
+                    analise=ultima_analise,
+                    config=config,
+                    alertas=alertas
+                )
+            except ImportError:
+                raise Exception("Gerador PPTX não disponível")
+        
+        if not arquivo_bytes:
+            raise Exception(f"Tipo de exportação não suportado: {tipo}")
+        
+        # Marcar como concluído
+        with get_db() as db:
+            from sqlalchemy import text
+            db.execute(text("""
+                UPDATE exportacoes SET status = 'concluido', arquivo = :arquivo, completed_at = CURRENT_TIMESTAMP WHERE id = :id
+            """), {"id": exportacao_id, "arquivo": arquivo_bytes})
+            db.commit()
+        
+        logger.info(f"Exportação {exportacao_id} concluída ({tipo})")
+        
+    except Exception as e:
+        logger.error(f"Erro na exportação {exportacao_id}: {e}")
+        try:
+            with get_db() as db:
+                from sqlalchemy import text
+                db.execute(text("""
+                    UPDATE exportacoes SET status = 'erro', erro = :erro, completed_at = CURRENT_TIMESTAMP WHERE id = :id
+                """), {"id": exportacao_id, "erro": "Erro ao gerar relatório"})
+                db.commit()
+        except Exception:
+            pass
+
+
+class ExportRequest(BaseModel):
+    empresa_id: int
+    tipo: str = 'pdf'  # pdf, pdf_parecer, excel, pptx
+
+
+@app.post("/exportacoes")
+async def agendar_exportacao(
+    dados: ExportRequest,
+    background_tasks: BackgroundTasks,
+    user: Dict = Depends(get_user)
+):
+    """Agenda uma nova exportação na fila."""
+    _init_exportacoes_table()
+    
+    empresa = obter_empresa(dados.empresa_id, user['id'])
+    if not empresa:
+        raise HTTPException(status_code=404, detail="Empresa não encontrada")
+    
+    # Limitar exportações pendentes por usuário (máx 5)
+    try:
+        with get_db() as db:
+            from sqlalchemy import text
+            count = db.execute(text("""
+                SELECT COUNT(*) as total FROM exportacoes 
+                WHERE contador_id = :cid AND status IN ('pendente', 'processando')
+            """), {"cid": user['id']}).fetchone()
+            if count and count.total >= 5:
+                raise HTTPException(status_code=429, detail="Limite de exportações simultâneas atingido. Aguarde as pendentes finalizarem.")
+    except HTTPException:
+        raise
+    except Exception:
+        pass
+    
+    # Criar registro
+    try:
+        with get_db() as db:
+            from sqlalchemy import text
+            result = db.execute(text("""
+                INSERT INTO exportacoes (empresa_id, contador_id, tipo, status, empresa_nome)
+                VALUES (:eid, :cid, :tipo, 'pendente', :nome)
+                RETURNING id
+            """), {
+                "eid": dados.empresa_id,
+                "cid": user['id'],
+                "tipo": dados.tipo,
+                "nome": empresa.get('razao_social', 'Empresa')
+            })
+            export_id = result.fetchone()[0]
+            db.commit()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Erro ao agendar exportação")
+    
+    # Processar em background
+    background_tasks.add_task(_processar_exportacao, export_id)
+    
+    return {"ok": True, "id": export_id, "status": "pendente"}
+
+
+@app.get("/exportacoes")
+async def listar_exportacoes(user: Dict = Depends(get_user)):
+    """Lista exportações do usuário."""
+    _init_exportacoes_table()
+    
+    try:
+        with get_db() as db:
+            from sqlalchemy import text
+            results = db.execute(text("""
+                SELECT id, empresa_id, tipo, status, empresa_nome, erro, created_at, completed_at
+                FROM exportacoes 
+                WHERE contador_id = :cid
+                ORDER BY created_at DESC
+                LIMIT 20
+            """), {"cid": user['id']}).fetchall()
+            
+            exportacoes = []
+            for r in results:
+                row = dict(r._mapping)
+                # Converter timestamps para ISO string
+                if row.get('created_at'):
+                    row['created_at'] = row['created_at'].isoformat()
+                if row.get('completed_at'):
+                    row['completed_at'] = row['completed_at'].isoformat()
+                exportacoes.append(row)
+            
+            return {"exportacoes": exportacoes}
+    except Exception as e:
+        return {"exportacoes": []}
+
+
+@app.get("/exportacoes/{export_id}/download")
+async def download_exportacao(export_id: int, user: Dict = Depends(get_user)):
+    """Baixa o arquivo de uma exportação concluída."""
+    from fastapi.responses import Response
+    
+    try:
+        with get_db() as db:
+            from sqlalchemy import text
+            result = db.execute(text("""
+                SELECT * FROM exportacoes 
+                WHERE id = :id AND contador_id = :cid AND status = 'concluido'
+            """), {"id": export_id, "cid": user['id']}).fetchone()
+            
+            if not result:
+                raise HTTPException(status_code=404, detail="Exportação não encontrada")
+            
+            exp = dict(result._mapping)
+            arquivo = bytes(exp['arquivo']) if not isinstance(exp.get('arquivo'), bytes) else exp.get('arquivo')
+            
+            if not arquivo:
+                raise HTTPException(status_code=404, detail="Arquivo não disponível")
+            
+            tipo = exp['tipo']
+            if 'excel' in tipo:
+                ext, media = 'xlsx', "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            elif tipo == 'pptx':
+                ext, media = 'pptx', "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+            else:
+                ext, media = 'pdf', "application/pdf"
+            
+            prefix = 'parecer' if tipo == 'pdf_parecer' else 'relatorio'
+            nome = f"{prefix}_{exp.get('empresa_nome', 'empresa')[:20]}.{ext}".replace(' ', '_')
+            
+            return Response(
+                content=arquivo,
+                media_type=media,
+                headers={"Content-Disposition": f'attachment; filename="{nome}"'}
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Erro ao baixar exportação")
+
+
+@app.delete("/exportacoes/{export_id}")
+async def remover_exportacao(export_id: int, user: Dict = Depends(get_user)):
+    """Remove uma exportação da lista."""
+    try:
+        with get_db() as db:
+            from sqlalchemy import text
+            db.execute(text("""
+                DELETE FROM exportacoes WHERE id = :id AND contador_id = :cid
+            """), {"id": export_id, "cid": user['id']})
+            db.commit()
+        return {"ok": True}
+    except Exception:
+        return {"ok": False}
 
 
 @app.post("/empresas/{empresa_id}/relatorios/link")
@@ -5597,6 +6088,7 @@ async def importar_balancete_e_salvar_route(
             
             salvar_dados_mensais(empresa_id, dados_salvar)
             _invalidar_cache_empresa(empresa_id)
+            _executar_analise_auto(empresa_id, user['id'])
         
         return {
             "sucesso": True,
@@ -5999,6 +6491,7 @@ async def confirmar_importacao_revisada(
         # salvar_dados_mensais já faz upsert (insert ou update)
         resultado = salvar_dados_mensais(empresa_id, dados_financeiros)
         _invalidar_cache_empresa(empresa_id)
+        _executar_analise_auto(empresa_id, user['id'])
         
         return {
             "sucesso": True,
