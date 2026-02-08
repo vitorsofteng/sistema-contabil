@@ -12,14 +12,15 @@ import { Button, Card, EmptyState, LoadingOverlay, LoadingScreen, Modal, ScoreCi
 import { Header } from '../../components/layout';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
+import { useExport } from '../../contexts/ExportContext';
 
 function EmpresaDetailPage({ empresaId, onNavigate }) {
   const { api } = useAuth();
   const toast = useToast();
+  const { agendarExportacao } = useExport();
   const [empresa, setEmpresa] = useState(null);
   const [registros, setRegistros] = useState([]);
   const [showPdfMenu, setShowPdfMenu] = useState(false);
-  const [baixandoPdf, setBaixandoPdf] = useState(false);
   const [analises, setAnalises] = useState([]);
   const [ultimaAnalise, setUltimaAnalise] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -161,26 +162,11 @@ function EmpresaDetailPage({ empresaId, onNavigate }) {
     }
   };
 
-  const downloadPDF = async (comParecer = false) => {
+  const exportarPDF = (comParecer = false) => {
     if (!ultimaAnalise) return;
     setShowPdfMenu(false);
-    setBaixandoPdf(true);
-    try {
-      const params = comParecer ? '?parecer_ia=true' : '';
-      const res = await api(`/empresas/${empresaId}/analises/${ultimaAnalise.id}/pdf${params}`);
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${comParecer ? 'parecer' : 'relatorio'}_${empresa?.razao_social || 'empresa'}.pdf`;
-      a.click();
-      URL.revokeObjectURL(url);
-      toast.success(comParecer ? 'Parecer consultivo baixado!' : 'Relatório baixado!');
-    } catch (err) {
-      toast.error('Erro ao baixar PDF');
-    } finally {
-      setBaixandoPdf(false);
-    }
+    const tipo = comParecer ? 'pdf_parecer' : 'pdf';
+    agendarExportacao(empresaId, tipo, empresa?.razao_social || 'Empresa');
   };
 
   const handleDelete = async () => {
@@ -263,21 +249,17 @@ function EmpresaDetailPage({ empresaId, onNavigate }) {
                 variant="secondary" 
                 size="sm" 
                 onClick={() => setShowPdfMenu(!showPdfMenu)}
-                disabled={baixandoPdf}
+                
                 className="flex items-center gap-1.5"
               >
-                {baixandoPdf ? (
-                  <><div className="w-4 h-4 border-2 border-slate-300 border-t-slate-600 rounded-full animate-spin" /> Gerando...</>
-                ) : (
-                  <><Download className="w-4 h-4" /> Exportar PDF <ChevronDown className="w-3.5 h-3.5" /></>
-                )}
+                <><Download className="w-4 h-4" /> Exportar PDF <ChevronDown className="w-3.5 h-3.5" /></>
               </Button>
               {showPdfMenu && (
                 <>
                   <div className="fixed inset-0 z-10" onClick={() => setShowPdfMenu(false)} />
                   <div className="absolute right-0 top-full mt-1 z-20 bg-white rounded-lg shadow-lg border border-slate-200 py-1 w-56">
                     <button
-                      onClick={() => downloadPDF(false)}
+                      onClick={() => exportarPDF(false)}
                       className="w-full text-left px-4 py-2.5 hover:bg-slate-50 flex items-center gap-3 transition-colors"
                     >
                       <FileText className="w-4 h-4 text-slate-500" />
@@ -288,7 +270,7 @@ function EmpresaDetailPage({ empresaId, onNavigate }) {
                     </button>
                     <div className="border-t border-slate-100 mx-2" />
                     <button
-                      onClick={() => downloadPDF(true)}
+                      onClick={() => exportarPDF(true)}
                       className="w-full text-left px-4 py-2.5 hover:bg-slate-50 flex items-center gap-3 transition-colors"
                     >
                       <FileText className="w-4 h-4 text-emerald-500" />
