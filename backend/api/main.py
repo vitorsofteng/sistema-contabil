@@ -1835,6 +1835,7 @@ async def add_dados(id: int, dados: DadosMensaisFrontend, user: Dict = Depends(g
     
     salvar_dados_mensais(id, dados_dict)
     _invalidar_cache_empresa(id)
+    _executar_analise_auto(id, user['id'])
     
     # Gerar alertas automaticamente após salvar dados
     alertas_gerados = 0
@@ -1918,6 +1919,7 @@ async def add_dados_bulk(id: int, dados: DadosBulk, user: Dict = Depends(get_use
         for dados_dict in dados_normalizados:
             salvar_dados_mensais(id, dados_dict)
             _invalidar_cache_empresa(id)
+            _executar_analise_auto(id, user['id'])
         
         return {
             "ok": True, 
@@ -1933,6 +1935,7 @@ async def add_dados_bulk(id: int, dados: DadosBulk, user: Dict = Depends(get_use
             dados_dict['mes'] = d.mes
             salvar_dados_mensais(id, dados_dict)
             _invalidar_cache_empresa(id)
+            _executar_analise_auto(id, user['id'])
         return {"ok": True, "salvos": len(dados.dados)}
 
 @app.delete("/empresas/{id}/dados/{ano}/{mes}")
@@ -2006,6 +2009,7 @@ async def confirmar_upload(id: int, dados: UploadConfirm, user: Dict = Depends(g
                 registros_criados += 1
                 
         _invalidar_cache_empresa(id)
+        _executar_analise_auto(id, user['id'])
         return {
             "ok": True, 
             "registros_criados": registros_criados,
@@ -2307,6 +2311,125 @@ def _invalidar_cache_empresa(empresa_id: int):
             logger.info(f"Cache invalidado: empresa {empresa_id}")
     except Exception:
         pass
+
+def _executar_analise_auto(empresa_id: int, contador_id: int):
+    """Executa análise financeira automaticamente após importação de dados.
+    Silencioso — nunca levanta exceção."""
+    try:
+        dados_db = obter_dados_para_analise(empresa_id)
+        if len(dados_db) < 3:
+            return  # Dados insuficientes
+        
+        from engine.analyzer_profissional import executar_analise as executar_analise_pro
+        
+        dados_mensais = []
+        for d in dados_db:
+            icms_valor = d.get('icms') or d.get('icms_deducao') or 0
+            pis_valor = d.get('pis') or d.get('pis_deducao') or 0
+            cofins_valor = d.get('cofins') or d.get('cofins_deducao') or 0
+            irpj_valor = d.get('irpj') or d.get('irpj_deducao') or 0
+            csll_valor = d.get('csll') or d.get('csll_deducao') or 0
+            iss_valor = d.get('iss') or d.get('iss_deducao') or 0
+            soma_impostos_individuais = icms_valor + pis_valor + cofins_valor + irpj_valor + csll_valor + iss_valor
+            impostos_campo = d.get('impostos') or d.get('impostos_total') or d.get('deducoes_receita') or 0
+            if icms_valor == 0 and impostos_campo > soma_impostos_individuais and soma_impostos_individuais > 0:
+                icms_valor = impostos_campo - soma_impostos_individuais
+                soma_impostos_individuais = impostos_campo
+            impostos_valor = max(soma_impostos_individuais, impostos_campo)
+            
+            item = {
+                'competencia': f"{d['ano']}-{d['mes']:02d}",
+                'receita_bruta': d.get('receita_bruta') or d.get('receita') or 0,
+                'custos_total': d.get('custos_total') or d.get('custos') or 0,
+                'despesas_operacionais': d.get('despesas_operacionais') or d.get('despesas') or 0,
+                'impostos': impostos_valor,
+                'impostos_total': impostos_valor,
+                'folha_pagamento': d.get('folha') or 0,
+                'disponivel': d.get('disponivel') or d.get('caixa') or 0,
+                'lucro_liquido': d.get('lucro_liquido') or ((d.get('receita') or 0) - (d.get('custos') or 0) - (d.get('despesas') or 0) - (d.get('impostos') or 0)),
+                'ativo_total': d.get('ativo_total') or 0,
+                'ativo_circulante': d.get('ativo_circulante') or 0,
+                'bancos': d.get('bancos') or 0,
+                'caixa': d.get('caixa') or 0,
+                'clientes': d.get('clientes') or 0,
+                'estoques': d.get('estoques') or 0,
+                'passivo_total': d.get('passivo_total') or 0,
+                'passivo_circulante': d.get('passivo_circulante') or 0,
+                'passivo_nao_circulante': d.get('passivo_nao_circulante') or 0,
+                'patrimonio_liquido': d.get('patrimonio_liquido') or d.get('capital_social') or 0,
+                'capital_social': d.get('capital_social') or 0,
+                'receita_servicos': d.get('receita_servicos') or 0,
+                'deducoes_receita': d.get('deducoes_receita') or 0,
+                'despesas_financeiras': d.get('despesas_financeiras') or 0,
+                'receitas_financeiras': d.get('receitas_financeiras') or 0,
+                'icms_deducao': icms_valor, 'icms': icms_valor,
+                'iss_deducao': iss_valor, 'iss': iss_valor,
+                'pis_deducao': pis_valor, 'pis': pis_valor,
+                'cofins_deducao': cofins_valor, 'cofins': cofins_valor,
+                'irpj_deducao': irpj_valor, 'irpj': irpj_valor,
+                'csll_deducao': csll_valor, 'csll': csll_valor,
+            }
+            dados_mensais.append(item)
+        
+        emp = None
+        try:
+            with get_db() as db:
+                from sqlalchemy import text
+                r = db.execute(text("SELECT * FROM empresas WHERE id = :id"), {"id": empresa_id}).fetchone()
+                if r: emp = dict(r._mapping)
+        except Exception:
+            pass
+        
+        resultado = executar_analise_pro(
+            dados_mensais=dados_mensais,
+            empresa_id=empresa_id,
+            empresa_nome=emp.get('razao_social', '') if emp else ''
+        )
+        
+        salvar_analise(empresa_id, resultado)
+        logger.info(f"Análise automática concluída: empresa {empresa_id}")
+        
+        # Gerar alertas automaticamente
+        try:
+            from engine.alertas import gerar_alertas_empresa
+            dados_para_alertas = listar_dados_mensais(empresa_id, limite=24)
+            alertas = gerar_alertas_empresa(
+                empresa=emp or {},
+                dados_mensais=dados_para_alertas,
+                analise_atual={'resultado_completo': resultado}
+            )
+            with get_db() as db:
+                from sqlalchemy import text
+                db.execute(text("""
+                    DELETE FROM alertas WHERE empresa_id = :eid AND contador_id = :cid AND resolvido = false
+                """), {"eid": empresa_id, "cid": contador_id})
+                for alerta in alertas:
+                    db.execute(text("""
+                        INSERT INTO alertas (
+                            empresa_id, contador_id, tipo, severidade, codigo,
+                            titulo, mensagem, valor_atual, valor_limite, valor_anterior,
+                            dados_json, periodo_referencia
+                        ) VALUES (
+                            :empresa_id, :contador_id, :tipo, :severidade, :codigo,
+                            :titulo, :mensagem, :valor_atual, :valor_limite, :valor_anterior,
+                            :dados_json, :periodo_referencia
+                        )
+                    """), {
+                        "empresa_id": empresa_id, "contador_id": contador_id,
+                        "tipo": alerta.get('tipo'), "severidade": alerta.get('severidade'),
+                        "codigo": alerta.get('codigo'), "titulo": alerta.get('titulo'),
+                        "mensagem": alerta.get('mensagem'), "valor_atual": alerta.get('valor_atual'),
+                        "valor_limite": alerta.get('valor_limite'), "valor_anterior": alerta.get('valor_anterior'),
+                        "dados_json": alerta.get('dados_json'), "periodo_referencia": alerta.get('periodo_referencia')
+                    })
+                db.commit()
+        except Exception as e:
+            logger.debug(f"Alertas automáticos: {e}")
+    
+    except ImportError:
+        logger.debug("analyzer_profissional não disponível para análise automática")
+    except Exception as e:
+        logger.info(f"Análise automática falhou (empresa {empresa_id}): {e}")
 
 @app.get("/empresas/{id}/analises/{aid}/pdf")
 async def get_pdf(id: int, aid: int, user: Dict = Depends(get_user), parecer_ia: bool = False):
@@ -2885,6 +3008,7 @@ async def executar_importacao_route(
             modo_agregacao=modo_agregacao
         )
         _invalidar_cache_empresa(empresa_id)
+        _executar_analise_auto(empresa_id, user['id'])
         return resultado
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -3198,6 +3322,7 @@ async def importar_arquivo_com_ia(
         logger.debug(f"[API] Dados: {dados_salvar}")
         salvar_dados_mensais(empresa_id, dados_salvar)
         _invalidar_cache_empresa(empresa_id)
+        _executar_analise_auto(empresa_id, user['id'])
         logger.debug(f"[API] Dados salvos com sucesso!")
         
         return {
@@ -5959,6 +6084,7 @@ async def importar_balancete_e_salvar_route(
             
             salvar_dados_mensais(empresa_id, dados_salvar)
             _invalidar_cache_empresa(empresa_id)
+            _executar_analise_auto(empresa_id, user['id'])
         
         return {
             "sucesso": True,
@@ -6361,6 +6487,7 @@ async def confirmar_importacao_revisada(
         # salvar_dados_mensais já faz upsert (insert ou update)
         resultado = salvar_dados_mensais(empresa_id, dados_financeiros)
         _invalidar_cache_empresa(empresa_id)
+        _executar_analise_auto(empresa_id, user['id'])
         
         return {
             "sucesso": True,

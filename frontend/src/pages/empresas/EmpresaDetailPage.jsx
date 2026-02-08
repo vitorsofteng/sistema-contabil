@@ -6,7 +6,7 @@ import UploadModal from './components/UploadModal';
 import RegistroModal from './components/RegistroModal';
 import EditEmpresaModal from './components/EditEmpresaModal';
 import React, { useState, useEffect } from 'react';
-import { AlertTriangle, ArrowLeft, BarChart3, ChevronDown, Download, FileText, PieChart as PieChartIcon, Trash2, Upload } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, ChevronDown, Download, FileText, PieChart as PieChartIcon, Trash2, Upload, BarChart3 } from 'lucide-react';
 import { BarChart } from 'recharts';
 import { Button, Card, EmptyState, LoadingOverlay, LoadingScreen, Modal, ScoreCircle, StatusBadge } from '../../components/ui';
 import { Header } from '../../components/layout';
@@ -24,21 +24,16 @@ function EmpresaDetailPage({ empresaId, onNavigate }) {
   const [analises, setAnalises] = useState([]);
   const [ultimaAnalise, setUltimaAnalise] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [analisando, setAnalisando] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
   const [showRegistro, setShowRegistro] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [tab, setTab] = useState('visao-geral');
-  const [temNovosDados, setTemNovosDados] = useState(false); // Controla se há novos dados desde última análise
-  const [dataUltimoLoad, setDataUltimoLoad] = useState(null); // Controla quando foi o último load
 
   // Recarregar dados sempre que a página for acessada (não apenas quando empresaId muda)
   useEffect(() => { 
     loadData(); 
-    // Marcar timestamp do load para debug
-    setDataUltimoLoad(new Date().toISOString());
   }, [empresaId]);
   
   // Também recarregar quando o usuário volta para esta página (foco na janela)
@@ -68,60 +63,13 @@ function EmpresaDetailPage({ empresaId, onNavigate }) {
       }
       if (regRes.ok) {
         const regData = await regRes.json();
-        const dadosList = regData.dados || regData || [];
-        setRegistros(dadosList);
-        
-        console.log('[EMPRESA] Dados carregados:', dadosList.length, 'registros');
-        
-        // Verificar se há dados mais recentes que a última análise
-        if (anaRes.ok) {
-          const anaData = await anaRes.json();
-          const analisesList = anaData.analises || anaData || [];
-          setAnalises(analisesList);
-          
-          if (analisesList.length > 0) {
-            setUltimaAnalise(analisesList[0]);
-            const dataUltimaAnalise = new Date(analisesList[0].data_analise);
-            
-            console.log('[EMPRESA] Última análise em:', analisesList[0].data_analise);
-            
-            // Verificar se algum dado foi criado/atualizado após a última análise
-            const temDadosNovos = dadosList.some(d => {
-              // Usar updated_at se disponível, senão created_at
-              const dataStr = d.updated_at || d.created_at;
-              if (!dataStr) {
-                console.log(`[EMPRESA] Dado ${d.competencia} sem data de criação/atualização`);
-                return false;
-              }
-              const dataAtualizacao = new Date(dataStr);
-              const isNovo = dataAtualizacao > dataUltimaAnalise;
-              if (isNovo) {
-                console.log(`[EMPRESA] ✓ Dado ${d.competencia} é mais recente:`, dataStr);
-              }
-              return isNovo;
-            });
-            
-            // Também verificar se há mais registros do que na última análise
-            // (caso os timestamps não estejam disponíveis)
-            const qtdMesesAnalise = analisesList[0].meses_analisados || 0;
-            const temMaisRegistros = dadosList.length > qtdMesesAnalise;
-            
-            const deveHabilitar = temDadosNovos || temMaisRegistros;
-            console.log(`[EMPRESA] Tem dados novos: ${temDadosNovos}, tem mais registros: ${temMaisRegistros} (${dadosList.length} vs ${qtdMesesAnalise})`);
-            
-            setTemNovosDados(deveHabilitar);
-          } else {
-            // Nunca fez análise, pode analisar se tem dados
-            console.log('[EMPRESA] Nenhuma análise anterior, habilitando botão');
-            setTemNovosDados(dadosList.length > 0);
-          }
-        }
-      } else if (anaRes.ok) {
+        setRegistros(regData.dados || regData || []);
+      }
+      if (anaRes.ok) {
         const anaData = await anaRes.json();
         const analisesList = anaData.analises || anaData || [];
         setAnalises(analisesList);
         if (analisesList.length > 0) setUltimaAnalise(analisesList[0]);
-        setTemNovosDados(analisesList.length === 0);
       }
     } catch (err) {
       toast.error('Erro ao carregar dados da empresa');
@@ -132,35 +80,10 @@ function EmpresaDetailPage({ empresaId, onNavigate }) {
   
   // Callback quando importação é bem sucedida
   const handleImportSuccess = () => {
-    setTemNovosDados(true);
     loadData();
   };
 
-  const executarAnalise = async () => {
-    if (registros.length < 3) {
-      toast.warning('Necessário pelo menos 3 meses de dados para análise');
-      return;
-    }
-    
-    setAnalisando(true);
-    try {
-      const res = await api(`/empresas/${empresaId}/analises`, { method: 'POST' });
-      if (res.ok) {
-        const result = await res.json();
-        toast.success('Análise concluída com sucesso!');
-        setTemNovosDados(false); // Análise feita, desabilita botão
-        await loadData();
-        setTab('analise');
-      } else {
-        const err = await res.json();
-        toast.error(err.detail || 'Erro ao executar análise');
-      }
-    } catch (err) {
-      toast.error('Erro de conexão ao executar análise');
-    } finally {
-      setAnalisando(false);
-    }
-  };
+
 
   const exportarPDF = (comParecer = false) => {
     if (!ultimaAnalise) return;
@@ -200,7 +123,6 @@ function EmpresaDetailPage({ empresaId, onNavigate }) {
 
   return (
     <div>
-      {analisando && <LoadingOverlay message="Executando análise financeira..." />}
       <Header 
         title={empresa.razao_social}
         subtitle={empresa.cnpj}
@@ -215,21 +137,7 @@ function EmpresaDetailPage({ empresaId, onNavigate }) {
             >
               <PieChartIcon className="w-4 h-4" /> DRE & Índices
             </Button>
-            <div className="relative group">
-              <Button 
-                onClick={executarAnalise} 
-                loading={analisando} 
-                disabled={registros.length < 3 || (!temNovosDados && ultimaAnalise)}
-              >
-                <BarChart3 className="w-4 h-4" /> Analisar
-              </Button>
-              {!temNovosDados && ultimaAnalise && registros.length >= 3 && (
-                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-2 bg-slate-800 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10">
-                  Importe novos dados para analisar novamente
-                  <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-800"></div>
-                </div>
-              )}
-            </div>
+
           </div>
         }
       />
@@ -303,9 +211,8 @@ function EmpresaDetailPage({ empresaId, onNavigate }) {
       {tab === 'analise' && ultimaAnalise && <AnaliseDetail analise={ultimaAnalise} />}
       {tab === 'analise' && !ultimaAnalise && (
         <Card className="p-8">
-          <EmptyState icon={BarChart3} title="Nenhuma análise realizada"
-            description={registros.length < 3 ? "Cadastre pelo menos 3 meses de dados para análise" : "Execute uma análise para ver o diagnóstico"}
-            action={<Button onClick={executarAnalise} disabled={registros.length < 3} loading={analisando}><BarChart3 className="w-4 h-4" /> Executar Análise</Button>}
+          <EmptyState icon={BarChart3} title="Nenhuma análise disponível"
+            description={registros.length < 3 ? "Importe pelo menos 3 meses de dados — a análise será gerada automaticamente" : "A análise será gerada automaticamente após a importação de dados"}
           />
         </Card>
       )}
