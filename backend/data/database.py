@@ -37,7 +37,6 @@ class DatabaseConfig:
     """Configurações do banco de dados."""
     
     ENV = os.environ.get('ENV', 'development')
-    USE_POSTGRES = os.environ.get('USE_POSTGRES', 'false').lower() == 'true'
     
     # PostgreSQL
     POSTGRES_USER = os.environ.get('POSTGRES_USER', 'contabil')
@@ -46,10 +45,16 @@ class DatabaseConfig:
     POSTGRES_PORT = os.environ.get('POSTGRES_PORT', '5432')
     POSTGRES_DB = os.environ.get('POSTGRES_DB', 'contabil_db')
     
-    DATABASE_URL = os.environ.get(
-        'DATABASE_URL',
-        f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
-    )
+    _raw_url = os.environ.get('DATABASE_URL', '')
+    
+    # Railway usa postgres:// mas SQLAlchemy 2.x exige postgresql://
+    if _raw_url.startswith('postgres://'):
+        _raw_url = _raw_url.replace('postgres://', 'postgresql://', 1)
+    
+    DATABASE_URL = _raw_url or f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
+    
+    # Auto-detecta se deve usar PostgreSQL: se DATABASE_URL está definida OU USE_POSTGRES=true
+    USE_POSTGRES = bool(_raw_url) or os.environ.get('USE_POSTGRES', 'false').lower() == 'true'
     
     # SQLite fallback
     SQLITE_PATH = os.environ.get('SQLITE_PATH', 'data/contabil.db')
@@ -137,7 +142,17 @@ class Contador(Base):
     senha_hash = Column(String(255), nullable=False)
     telefone = Column(String(50))
     crc = Column(String(50))
+    
+    # Dados do escritório
+    escritorio = Column(String(255))  # Nome do escritório contábil
+    cnpj = Column(String(14))  # CNPJ do escritório (só números)
+    
     ativo = Column(Boolean, default=True)
+    
+    # Verificação de email
+    email_verified = Column(Boolean, default=False)
+    email_verification_token = Column(String(500))
+    email_verification_expires = Column(DateTime)
     
     # Segurança
     password_changed_at = Column(DateTime)
@@ -245,6 +260,7 @@ class DadosMensal(Base):
     patrimonio_liquido = Column(Float, default=0)
     capital_social = Column(Float, default=0)
     lucros_acumulados = Column(Float, default=0)
+    dividendos_pagar = Column(Float, default=0)  # Lucros declarados mas não pagos
     
     # Campos expandidos - DRE
     receita_bruta = Column(Float, default=0)
@@ -264,6 +280,7 @@ class DadosMensal(Base):
     cofins = Column(Float, default=0)
     irpj = Column(Float, default=0)
     csll = Column(Float, default=0)
+    icms = Column(Float, default=0)  # ADICIONADO: ICMS é o maior imposto
     impostos_total = Column(Float, default=0)
     
     # Metadados
@@ -329,7 +346,34 @@ class TokenBlacklist(Base):
 def init_db():
     """Cria todas as tabelas."""
     Base.metadata.create_all(bind=engine)
+    
+    # Migrações incrementais (colunas novas em tabelas existentes)
+    _run_migrations()
+    
     print(f"✓ Banco inicializado: {'PostgreSQL' if DatabaseConfig.USE_POSTGRES else 'SQLite'}")
+
+
+def _run_migrations():
+    """Adiciona colunas novas se não existirem (compatível com SQLite e PostgreSQL)."""
+    migrations = [
+        ("contadores", "email_verified", "BOOLEAN DEFAULT 0"),
+        ("contadores", "email_verification_token", "VARCHAR(500)"),
+        ("contadores", "email_verification_expires", "DATETIME"),
+    ]
+    
+    with get_db() as db:
+        for table, column, col_type in migrations:
+            try:
+                db.execute(text(f"SELECT {column} FROM {table} LIMIT 1"))
+            except Exception:
+                try:
+                    db.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}"))
+                    db.commit()
+                    print(f"  ✓ Migração: {table}.{column} adicionada")
+                except Exception as e:
+                    db.rollback()
+                    # Coluna pode já existir em outra sessão
+                    pass
 
 
 # =============================================================================
@@ -339,17 +383,12 @@ def init_db():
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-try:
-    from auth.security import (
-        hash_password, verify_password, validate_password_strength,
-        create_access_token, create_refresh_token, decode_access_token,
-        decode_refresh_token, create_reset_token, AuthConfig
-    )
-    BCRYPT_AVAILABLE = True
-except ImportError:
-    BCRYPT_AVAILABLE = False
-    def hash_password(s): return hashlib.sha256(s.encode()).hexdigest()
-    def verify_password(p, h): return hashlib.sha256(p.encode()).hexdigest() == h
+from auth.security import (
+    hash_password, verify_password, validate_password_strength,
+    create_access_token, create_refresh_token, decode_access_token,
+    decode_refresh_token, create_reset_token, AuthConfig
+)
+BCRYPT_AVAILABLE = True  # Sempre True - dependência obrigatória
 
 
 # =============================================================================
@@ -423,7 +462,7 @@ def verificar_token_blacklist(jti: str) -> bool:
 # CONTADORES (USUÁRIOS)
 # =============================================================================
 
-def criar_contador(nome: str, email: str, senha: str, telefone: str = None, crc: str = None) -> dict:
+def criar_contador(nome: str, email: str, senha: str, telefone: str = None, crc: str = None, escritorio: str = None, cnpj: str = None) -> dict:
     """Cria um novo contador."""
     
     if BCRYPT_AVAILABLE:
@@ -442,13 +481,19 @@ def criar_contador(nome: str, email: str, senha: str, telefone: str = None, crc:
             raise ValueError("Email já cadastrado")
         
         # Cria contador
+        verification_token = secrets.token_urlsafe(48)
         contador = Contador(
             nome=nome,
             email=email,
             senha_hash=hash_password(senha),
             telefone=telefone,
             crc=crc,
-            password_changed_at=datetime.now()
+            escritorio=escritorio,
+            cnpj=cnpj,
+            password_changed_at=datetime.now(),
+            email_verified=False,
+            email_verification_token=verification_token,
+            email_verification_expires=datetime.now() + timedelta(hours=24)
         )
         db.add(contador)
         db.flush()
@@ -464,8 +509,8 @@ def criar_contador(nome: str, email: str, senha: str, telefone: str = None, crc:
                 contador_id=contador.id,
                 token_jti=access_payload['jti'],
                 refresh_token_jti=refresh_payload['jti'],
-                expires_at=datetime.utcnow() + timedelta(minutes=15),
-                refresh_expires_at=datetime.utcnow() + timedelta(days=7)
+                expires_at=datetime.utcnow() + timedelta(hours=8),
+                refresh_expires_at=datetime.utcnow() + timedelta(days=30)
             )
         else:
             access_token = secrets.token_urlsafe(32)
@@ -475,8 +520,8 @@ def criar_contador(nome: str, email: str, senha: str, telefone: str = None, crc:
                 contador_id=contador.id,
                 token_jti=access_token,
                 refresh_token_jti=refresh_token,
-                expires_at=datetime.now() + timedelta(minutes=15),
-                refresh_expires_at=datetime.now() + timedelta(days=7)
+                expires_at=datetime.now() + timedelta(hours=8),
+                refresh_expires_at=datetime.now() + timedelta(days=30)
             )
         
         db.add(sessao)
@@ -487,10 +532,59 @@ def criar_contador(nome: str, email: str, senha: str, telefone: str = None, crc:
             'email': contador.email,
             'telefone': contador.telefone,
             'crc': contador.crc,
+            'escritorio': contador.escritorio,
+            'cnpj': contador.cnpj,
             'token': access_token,
             'refresh_token': refresh_token,
-            'expires_in': 900
+            'expires_in': 28800,
+            'email_verified': False,
+            'verification_token': verification_token
         }
+
+
+def verificar_email_token(token: str) -> dict:
+    """Verifica email usando token de verificação."""
+    with get_db() as db:
+        contador = db.query(Contador).filter(
+            Contador.email_verification_token == token,
+            Contador.deleted_at.is_(None)
+        ).first()
+        
+        if not contador:
+            raise ValueError("Token de verificação inválido")
+        
+        if contador.email_verified:
+            return {'email': contador.email, 'already_verified': True}
+        
+        if contador.email_verification_expires and contador.email_verification_expires < datetime.now():
+            raise ValueError("Token expirado. Solicite um novo email de verificação.")
+        
+        contador.email_verified = True
+        contador.email_verification_token = None
+        contador.email_verification_expires = None
+        
+        return {'email': contador.email, 'nome': contador.nome, 'already_verified': False}
+
+
+def reenviar_verificacao_email(email: str) -> Optional[str]:
+    """Gera novo token de verificação de email. Retorna token ou None."""
+    with get_db() as db:
+        contador = db.query(Contador).filter(
+            Contador.email == email,
+            Contador.deleted_at.is_(None)
+        ).first()
+        
+        if not contador:
+            return None
+        
+        if contador.email_verified:
+            return None
+        
+        new_token = secrets.token_urlsafe(48)
+        contador.email_verification_token = new_token
+        contador.email_verification_expires = datetime.now() + timedelta(hours=24)
+        
+        return new_token
 
 
 def autenticar_contador(email: str, senha: str, ip: str = None) -> Optional[Dict]:
@@ -532,8 +626,8 @@ def autenticar_contador(email: str, senha: str, ip: str = None) -> Optional[Dict
                 token_jti=access_payload['jti'],
                 refresh_token_jti=refresh_payload['jti'],
                 ip_address=ip,
-                expires_at=datetime.utcnow() + timedelta(minutes=15),
-                refresh_expires_at=datetime.utcnow() + timedelta(days=7)
+                expires_at=datetime.utcnow() + timedelta(hours=8),
+                refresh_expires_at=datetime.utcnow() + timedelta(days=30)
             )
         else:
             access_token = secrets.token_urlsafe(32)
@@ -544,8 +638,8 @@ def autenticar_contador(email: str, senha: str, ip: str = None) -> Optional[Dict
                 token_jti=access_token,
                 refresh_token_jti=refresh_token,
                 ip_address=ip,
-                expires_at=datetime.now() + timedelta(minutes=15),
-                refresh_expires_at=datetime.now() + timedelta(days=7)
+                expires_at=datetime.now() + timedelta(hours=8),
+                refresh_expires_at=datetime.now() + timedelta(days=30)
             )
         
         db.add(sessao)
@@ -556,9 +650,10 @@ def autenticar_contador(email: str, senha: str, ip: str = None) -> Optional[Dict
             'email': contador.email,
             'telefone': contador.telefone,
             'crc': contador.crc,
+            'email_verified': bool(contador.email_verified),
             'token': access_token,
             'refresh_token': refresh_token,
-            'expires_in': 900
+            'expires_in': 28800
         }
 
 
@@ -601,7 +696,8 @@ def validar_token(token: str) -> Optional[Dict]:
             'nome': contador.nome,
             'email': contador.email,
             'telefone': contador.telefone,
-            'crc': contador.crc
+            'crc': contador.crc,
+            'email_verified': bool(contador.email_verified)
         }
 
 
@@ -677,12 +773,12 @@ def refresh_access_token(refresh_token: str) -> Optional[Dict]:
         new_payload = decode_access_token(new_token)
         
         sessao.token_jti = new_payload['jti']
-        sessao.expires_at = datetime.utcnow() + timedelta(minutes=15)
+        sessao.expires_at = datetime.utcnow() + timedelta(hours=8)
         sessao.last_used_at = datetime.now()
         
         return {
             'token': new_token,
-            'expires_in': 900,
+            'expires_in': 28800,
             'user': {
                 'id': contador.id,
                 'nome': contador.nome,
@@ -961,6 +1057,21 @@ def excluir_empresa(empresa_id: int, contador_id: int):
 
 def salvar_dados_mensais(empresa_id: int, dados: Dict) -> int:
     """Salva ou atualiza dados mensais - suporta campos expandidos."""
+    
+    print(f"[DB] Salvando dados para empresa {empresa_id}")
+    print(f"[DB] Dados recebidos: {dados}")
+    
+    # Mapeia campos da IA para campos do banco
+    # Garante que os campos básicos sejam preenchidos a partir dos expandidos
+    if 'receita_bruta' in dados:
+        dados['receita'] = dados.get('receita') or dados['receita_bruta']
+    if 'despesas_operacionais' in dados:
+        dados['despesas'] = dados.get('despesas') or dados['despesas_operacionais']
+    if 'disponivel' in dados:
+        dados['caixa'] = dados.get('caixa') or dados['disponivel']
+    
+    print(f"[DB] Dados após mapeamento: receita={dados.get('receita')}, despesas={dados.get('despesas')}, caixa={dados.get('caixa')}")
+    
     with get_db() as db:
         existing = db.query(DadosMensal).filter(
             DadosMensal.empresa_id == empresa_id,
@@ -970,11 +1081,15 @@ def salvar_dados_mensais(empresa_id: int, dados: Dict) -> int:
         ).first()
         
         if existing:
+            print(f"[DB] Atualizando registro existente ID={existing.id}")
             for key, value in dados.items():
                 if hasattr(existing, key) and key not in ['id', 'empresa_id', 'created_at']:
                     setattr(existing, key, value)
+            db.commit()
+            print(f"[DB] Registro atualizado com sucesso")
             return existing.id
         else:
+            print(f"[DB] Criando novo registro")
             dado = DadosMensal(
                 empresa_id=empresa_id,
                 ano=dados['ano'],
@@ -986,18 +1101,22 @@ def salvar_dados_mensais(empresa_id: int, dados: Dict) -> int:
                 impostos=dados.get('impostos', 0),
                 folha=dados.get('folha', 0),
                 caixa=dados.get('caixa', 0),
-                # Campos expandidos - Balanço
+                # Campos expandidos - Balanço Ativo
                 ativo_total=dados.get('ativo_total', 0),
                 ativo_circulante=dados.get('ativo_circulante', 0),
                 disponivel=dados.get('disponivel', 0),
                 bancos=dados.get('bancos', 0),
                 clientes=dados.get('clientes', 0),
                 estoques=dados.get('estoques', 0),
+                # Campos expandidos - Balanço Passivo
                 passivo_total=dados.get('passivo_total', 0),
                 passivo_circulante=dados.get('passivo_circulante', 0),
                 passivo_nao_circulante=dados.get('passivo_nao_circulante', 0),
+                fornecedores=dados.get('fornecedores', 0),
+                # Patrimônio Líquido
                 patrimonio_liquido=dados.get('patrimonio_liquido', 0),
                 capital_social=dados.get('capital_social', 0),
+                lucros_acumulados=dados.get('lucros_acumulados', 0),
                 # Campos expandidos - DRE
                 receita_bruta=dados.get('receita_bruta', 0),
                 receita_servicos=dados.get('receita_servicos', 0),
@@ -1013,13 +1132,15 @@ def salvar_dados_mensais(empresa_id: int, dados: Dict) -> int:
                 cofins=dados.get('cofins', dados.get('cofins_deducao', 0)),
                 irpj=dados.get('irpj', dados.get('irpj_deducao', 0)),
                 csll=dados.get('csll', dados.get('csll_deducao', 0)),
+                icms=dados.get('icms', dados.get('icms_deducao', 0)),  # ADICIONADO
                 impostos_total=dados.get('impostos_total', 0),
                 # Meta
                 observacoes=dados.get('observacoes'),
                 arquivo_origem=dados.get('arquivo_origem')
             )
             db.add(dado)
-            db.flush()
+            db.commit()
+            print(f"[DB] Novo registro criado com ID={dado.id}")
             return dado.id
 
 
@@ -1030,6 +1151,8 @@ def listar_dados_mensais(empresa_id: int, limite: int = 36) -> List[Dict]:
             DadosMensal.empresa_id == empresa_id,
             DadosMensal.deleted_at.is_(None)
         ).order_by(desc(DadosMensal.ano), desc(DadosMensal.mes)).limit(limite).all()
+        
+        print(f"[DB] Listando dados para empresa {empresa_id}: {len(dados)} registros encontrados")
         
         result = []
         for d in dados:
@@ -1045,17 +1168,29 @@ def listar_dados_mensais(empresa_id: int, limite: int = 36) -> List[Dict]:
                 'impostos': d.impostos,
                 'folha': d.folha,
                 'caixa': d.caixa,
-                'observacoes': d.observacoes
+                'observacoes': d.observacoes,
+                # Campos de auditoria para controle de novos dados
+                'created_at': d.created_at.isoformat() if hasattr(d, 'created_at') and d.created_at else None,
+                'updated_at': d.updated_at.isoformat() if hasattr(d, 'updated_at') and d.updated_at else None
             }
             
-            # Adicionar campos expandidos se existirem
+            # Adicionar TODOS os campos expandidos se existirem
             campos_expandidos = [
+                # Balanço - Ativo
                 'ativo_total', 'ativo_circulante', 'disponivel', 'bancos', 'clientes',
-                'estoques', 'passivo_total', 'passivo_circulante', 'passivo_nao_circulante',
-                'patrimonio_liquido', 'capital_social', 'receita_bruta', 'receita_servicos',
-                'deducoes_receita', 'custos_total', 'despesas_operacionais',
+                'estoques', 'ativo_nao_circulante', 'imobilizado',
+                # Balanço - Passivo
+                'passivo_total', 'passivo_circulante', 'passivo_nao_circulante',
+                'fornecedores', 'obrigacoes_trabalhistas', 'obrigacoes_tributarias',
+                'emprestimos_cp', 'emprestimos_lp',
+                # Balanço - Patrimônio
+                'patrimonio_liquido', 'capital_social', 'lucros_acumulados',
+                # DRE
+                'receita_bruta', 'receita_servicos', 'deducoes_receita', 'receita_liquida',
+                'custos_total', 'lucro_bruto', 'despesas_operacionais', 
                 'despesas_financeiras', 'receitas_financeiras', 'lucro_liquido',
-                'iss', 'pis', 'cofins', 'irpj', 'csll', 'impostos_total'
+                # Impostos detalhados
+                'iss', 'pis', 'cofins', 'irpj', 'csll', 'icms', 'impostos_total'
             ]
             
             for campo in campos_expandidos:
@@ -1064,6 +1199,7 @@ def listar_dados_mensais(empresa_id: int, limite: int = 36) -> List[Dict]:
                     item[campo] = valor
             
             result.append(item)
+            print(f"[DB] Registro {d.ano}-{d.mes:02d}: receita={d.receita}, updated_at={item['updated_at']}")
         
         return result
 
@@ -1101,7 +1237,7 @@ def obter_dados_para_analise(empresa_id: int) -> List[Dict]:
                 'receita_bruta', 'receita_servicos', 'deducoes_receita',
                 'receita_liquida', 'custos_total', 'lucro_bruto',
                 'despesas_operacionais', 'despesas_financeiras', 'receitas_financeiras',
-                'lucro_liquido', 'iss', 'pis', 'cofins', 'irpj', 'csll', 'impostos_total'
+                'lucro_liquido', 'iss', 'pis', 'cofins', 'irpj', 'csll', 'icms', 'impostos_total'
             ]
             
             for campo in campos_expandidos:

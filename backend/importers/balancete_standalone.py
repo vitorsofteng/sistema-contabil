@@ -2,8 +2,8 @@
 Importador Inteligente de Balancetes - Versão Standalone
 Sistema Contábil - Sprint 5
 
-Este módulo importa balancetes em PDF e XLS/XLSX sem dependências externas pesadas.
-Funciona com arquivos .xls antigos (Excel 97-2003) usando parsing binário.
+Este módulo importa balancetes em PDF sem dependências externas pesadas.
+Funciona com arquivos PDF.
 """
 
 import re
@@ -266,143 +266,6 @@ class ResultadoImportacao:
 
 
 # ============================================================================
-# PARSER DE ARQUIVOS XLS (SEM DEPENDÊNCIAS)
-# ============================================================================
-
-class ParserXLSBinario:
-    """Parser de arquivos XLS antigos usando análise binária."""
-    
-    def __init__(self):
-        self.strings = []
-        self.valores = []
-    
-    def ler_arquivo(self, caminho: str) -> Tuple[List[str], List[float]]:
-        """Lê arquivo XLS e extrai strings e valores."""
-        with open(caminho, 'rb') as f:
-            data = f.read()
-        
-        # Verificar se é formato XLS
-        if data[:4] != b'\xd0\xcf\x11\xe0':
-            raise ValueError("Arquivo não é um XLS válido (formato OLE)")
-        
-        self.strings = self._extrair_strings_utf16(data)
-        self.valores = self._extrair_valores(data)
-        
-        return self.strings, self.valores
-    
-    def _extrair_strings_utf16(self, data: bytes) -> List[str]:
-        """Extrai strings UTF-16LE do arquivo XLS."""
-        strings = []
-        
-        # Procurar por sequências de caracteres UTF-16LE
-        i = 0
-        while i < len(data) - 1:
-            # Verificar se parece início de string UTF-16LE
-            # (caractere ASCII seguido de 0x00)
-            if data[i] >= 32 and data[i] < 127 and data[i+1] == 0:
-                # Tentar extrair string UTF-16LE
-                texto = []
-                j = i
-                while j < len(data) - 1:
-                    low = data[j]
-                    high = data[j+1] if j+1 < len(data) else 0
-                    char_code = low | (high << 8)
-                    
-                    # Caracteres imprimíveis (incluindo acentos latinos)
-                    if (32 <= char_code < 127) or (0xC0 <= char_code <= 0xFF) or char_code in [0x2D, 0x2F, 0x2E]:
-                        texto.append(chr(char_code))
-                        j += 2
-                    elif char_code == 0:
-                        # Fim da string
-                        break
-                    else:
-                        break
-                
-                if len(texto) >= 3:
-                    s = ''.join(texto).strip()
-                    if s and len(s) >= 3:
-                        strings.append(s)
-                    i = j
-                else:
-                    i += 2
-            else:
-                i += 1
-        
-        # Também procurar strings específicas importantes
-        importantes = [
-            "Empresa:",
-            "C.N.P.J.:",
-            "CNPJ:",
-            "Período:",
-            "Contador",
-            "CPF:",
-            "CRC",
-            "BALANCETE",
-        ]
-        
-        for imp in importantes:
-            imp_bytes = imp.encode('utf-16-le')
-            pos = 0
-            while True:
-                pos = data.find(imp_bytes, pos)
-                if pos < 0:
-                    break
-                
-                # Extrair contexto (próximos 200 bytes)
-                context = data[pos:pos+400]
-                try:
-                    # Decodificar até encontrar caractere inválido
-                    decoded = ""
-                    for k in range(0, len(context)-1, 2):
-                        char_code = context[k] | (context[k+1] << 8)
-                        if char_code == 0 or char_code > 0xFFFF:
-                            continue
-                        if (32 <= char_code < 127) or (0xC0 <= char_code <= 0xFF) or char_code in [0x2D, 0x2F, 0x2E, 0x3A, 0x0D, 0x0A]:
-                            decoded += chr(char_code)
-                        elif len(decoded) > 10:
-                            break
-                    
-                    if decoded and len(decoded) >= 5:
-                        # Limpar e adicionar
-                        decoded = decoded.strip()
-                        decoded = re.sub(r'[\x00-\x1f]+', ' ', decoded)
-                        decoded = re.sub(r'\s+', ' ', decoded)
-                        if decoded not in strings:
-                            strings.append(decoded)
-                except:
-                    pass
-                
-                pos += 2
-        
-        # Remover duplicatas mantendo ordem
-        seen = set()
-        unicos = []
-        for s in strings:
-            if s not in seen:
-                seen.add(s)
-                unicos.append(s)
-        
-        return unicos
-    
-    def _extrair_valores(self, data: bytes) -> List[float]:
-        """Extrai valores numéricos IEEE 754 do arquivo."""
-        valores = set()
-        
-        for i in range(0, len(data) - 8):
-            try:
-                val = struct.unpack('<d', data[i:i+8])[0]
-                
-                # Filtrar valores que parecem monetários
-                if 0.01 <= abs(val) <= 1e11:
-                    rounded = round(val, 2)
-                    if abs(val - rounded) < 0.001:
-                        valores.add(rounded)
-            except:
-                pass
-        
-        return sorted(valores, reverse=True)
-
-
 # ============================================================================
 # PARSER DE TEXTO (PDF E TEXTO)
 # ============================================================================
@@ -647,10 +510,9 @@ class ImportadorBalancete:
     
     def __init__(self):
         self.parser_texto = ParserTexto()
-        self.parser_xls = ParserXLSBinario()
     
     def importar(self, caminho: str) -> ResultadoImportacao:
-        """Importa balancete de arquivo."""
+        """Importa balancete de arquivo PDF."""
         if not os.path.exists(caminho):
             return ResultadoImportacao(
                 sucesso=False,
@@ -662,178 +524,16 @@ class ImportadorBalancete:
         try:
             if extensao == '.pdf':
                 return self._importar_pdf(caminho)
-            elif extensao in ['.xls', '.xlsx', '.xlsm']:
-                return self._importar_excel(caminho)
-            elif extensao == '.csv':
-                return self._importar_csv(caminho)
             else:
                 return ResultadoImportacao(
                     sucesso=False,
-                    mensagem=f"Formato não suportado: {extensao}"
+                    mensagem=f"Formato não suportado: {extensao}. Use apenas PDF."
                 )
         except Exception as e:
             return ResultadoImportacao(
                 sucesso=False,
                 mensagem=f"Erro ao processar arquivo: {str(e)}",
                 erros=[str(e)]
-            )
-    
-    def _importar_excel(self, caminho: str) -> ResultadoImportacao:
-        """Importa arquivo Excel (XLS ou XLSX)."""
-        avisos = []
-        campos_mapeados = []
-        
-        # Verificar se é XLS antigo ou XLSX
-        with open(caminho, 'rb') as f:
-            header = f.read(4)
-        
-        if header == b'\xd0\xcf\x11\xe0':
-            # XLS antigo - usar parser binário
-            return self._importar_xls_binario(caminho)
-        elif header[:2] == b'PK':
-            # XLSX (é um ZIP)
-            return self._importar_xlsx(caminho)
-        else:
-            return ResultadoImportacao(
-                sucesso=False,
-                mensagem="Formato de arquivo não reconhecido. Use XLS ou XLSX."
-            )
-    
-    def _importar_xls_binario(self, caminho: str) -> ResultadoImportacao:
-        """Importa XLS antigo usando parser binário."""
-        avisos = []
-        campos_mapeados = []
-        
-        # Extrair dados
-        strings, valores = self.parser_xls.ler_arquivo(caminho)
-        
-        # Concatenar strings para extração de metadados
-        texto = '\n'.join(strings)
-        
-        # Extrair metadados
-        cnpj = self.parser_texto.extrair_cnpj(texto)
-        if not cnpj:
-            return ResultadoImportacao(
-                sucesso=False,
-                mensagem="CNPJ não encontrado no arquivo"
-            )
-        
-        nome = self.parser_texto.extrair_nome_empresa(texto)
-        if not nome:
-            nome = "EMPRESA NÃO IDENTIFICADA"
-            avisos.append("Nome da empresa não identificado")
-        
-        periodo_inicio, periodo_fim = self.parser_texto.extrair_periodo(texto)
-        if not periodo_inicio:
-            avisos.append("Período não identificado, usando data atual")
-            periodo_fim = date.today()
-            periodo_inicio = periodo_fim.replace(day=1)
-        
-        contador, crc, cpf = self.parser_texto.extrair_contador(texto)
-        
-        # Criar estrutura
-        empresa = DadosEmpresa(
-            nome=nome,
-            cnpj=cnpj,
-            contador_nome=contador,
-            contador_crc=crc,
-            contador_cpf=cpf
-        )
-        
-        dados = DadosBalancete(
-            empresa=empresa,
-            periodo_inicio=periodo_inicio,
-            periodo_fim=periodo_fim,
-            arquivo_origem=os.path.basename(caminho),
-            hash_arquivo=self._calcular_hash(caminho)
-        )
-        
-        # Mapear valores conhecidos
-        for valor in valores:
-            campo = self.VALORES_CONHECIDOS.get(valor)
-            if campo and hasattr(dados, campo):
-                valor_atual = getattr(dados, campo)
-                if valor_atual == 0:  # Só atribuir se ainda não definido
-                    setattr(dados, campo, valor)
-                    campos_mapeados.append(f"{campo}: R$ {valor:,.2f}")
-        
-        # Mapear strings para campos
-        for s in strings:
-            s_lower = s.lower().strip()
-            for pattern, campo in self.MAPEAMENTO.items():
-                if pattern == s_lower or s_lower.startswith(pattern):
-                    # Tentar encontrar valor correspondente
-                    if campo not in [c.split(':')[0] for c in campos_mapeados]:
-                        campos_mapeados.append(f"{campo}: (encontrado)")
-                    break
-        
-        # Valores especiais que precisam de tratamento duplicado
-        # ativo_total = passivo_total (balanço)
-        if dados.ativo_total > 0 and dados.passivo_total == 0:
-            dados.passivo_total = dados.ativo_total
-            campos_mapeados.append(f"passivo_total: R$ {dados.ativo_total:,.2f} (= ativo)")
-        
-        # capital_social = caixa (no caso JMR são iguais)
-        if dados.capital_social == 0 and dados.caixa > 0:
-            dados.capital_social = dados.caixa
-            campos_mapeados.append(f"capital_social: R$ {dados.caixa:,.2f}")
-        
-        # patrimonio_liquido = capital_social (simplificado)
-        if dados.patrimonio_liquido == 0:
-            dados.patrimonio_liquido = dados.capital_social
-        
-        # ativo_circulante ≈ ativo_total (empresa de serviços)
-        if dados.ativo_circulante == 0:
-            dados.ativo_circulante = dados.ativo_total
-        
-        # passivo_circulante
-        if dados.passivo_circulante == 0:
-            dados.passivo_circulante = dados.passivo_total - dados.patrimonio_liquido - dados.passivo_nao_circulante
-        
-        # Calcular derivados
-        self._calcular_derivados(dados)
-        
-        return ResultadoImportacao(
-            sucesso=True,
-            mensagem=f"Balancete importado: {nome}",
-            dados=dados,
-            avisos=avisos,
-            campos_mapeados=campos_mapeados
-        )
-    
-    def _importar_xlsx(self, caminho: str) -> ResultadoImportacao:
-        """Importa XLSX usando openpyxl."""
-        try:
-            from openpyxl import load_workbook
-            
-            wb = load_workbook(caminho, data_only=True)
-            ws = wb.active
-            
-            # Converter para texto
-            linhas = []
-            valores = []
-            
-            for row in ws.iter_rows():
-                linha_texto = []
-                for cell in row:
-                    val = cell.value
-                    if val is not None:
-                        if isinstance(val, (int, float)):
-                            valores.append(val)
-                        linha_texto.append(str(val))
-                linhas.append(' '.join(linha_texto))
-            
-            texto = '\n'.join(linhas)
-            
-            # Usar mesmo processamento do XLS
-            # ... (código similar ao _importar_xls_binario)
-            
-            return self._processar_texto_e_valores(texto, valores, caminho)
-            
-        except ImportError:
-            return ResultadoImportacao(
-                sucesso=False,
-                mensagem="Biblioteca openpyxl não disponível para XLSX"
             )
     
     def _importar_pdf(self, caminho: str) -> ResultadoImportacao:
@@ -865,36 +565,6 @@ class ImportadorBalancete:
         for match in re.finditer(r'([\d.]+,\d{2})', texto):
             valores.append(self.parser_texto.parse_valor(match.group(1)))
         
-        return self._processar_texto_e_valores(texto, valores, caminho)
-    
-    def _importar_csv(self, caminho: str) -> ResultadoImportacao:
-        """Importa CSV."""
-        import csv
-        
-        with open(caminho, 'r', encoding='utf-8-sig') as f:
-            conteudo = f.read()
-        
-        # Detectar delimitador
-        for delim in [';', ',', '\t']:
-            if delim in conteudo:
-                break
-        
-        linhas = []
-        valores = []
-        
-        for linha in conteudo.split('\n'):
-            campos = linha.split(delim)
-            linhas.append(' '.join(campos))
-            
-            for campo in campos:
-                try:
-                    val = self.parser_texto.parse_valor(campo)
-                    if val > 0:
-                        valores.append(val)
-                except:
-                    pass
-        
-        texto = '\n'.join(linhas)
         return self._processar_texto_e_valores(texto, valores, caminho)
     
     def _processar_texto_e_valores(self, texto: str, valores: List[float], caminho: str) -> ResultadoImportacao:

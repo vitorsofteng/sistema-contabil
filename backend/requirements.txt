@@ -31,9 +31,8 @@ statsmodels==0.14.1
 # PDF Generation
 reportlab==4.0.9
 
-# Excel Support
+# Excel Support (report export only)
 openpyxl==3.1.2
-xlrd==2.0.1
 
 # PDF Reading
 PyMuPDF==1.23.8
@@ -47,6 +46,9 @@ scipy==1.12.0
 
 # Billing / Payments
 stripe==7.10.0
+
+# Email Service
+resend==0.7.0
 
 # ============================================================================
 # TESTES - Sprint 3

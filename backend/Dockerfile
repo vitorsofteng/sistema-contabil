@@ -4,7 +4,7 @@ WORKDIR /app
 
 # Instala dependências do sistema
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
+    gcc curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Copia requirements e instala
@@ -20,8 +20,13 @@ RUN mkdir -p /app/data
 # Define PYTHONPATH
 ENV PYTHONPATH=/app
 
-# Expõe porta
-EXPOSE 8000
+# Railway usa a variável PORT; fallback 8000 para local
+ENV PORT=8000
+EXPOSE ${PORT}
 
-# Comando de inicialização
-CMD ["python", "-m", "uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Healthcheck
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+    CMD curl -f http://localhost:${PORT}/health || exit 1
+
+# Comando de inicialização - usa $PORT para Railway
+CMD uvicorn api.main:app --host 0.0.0.0 --port ${PORT}

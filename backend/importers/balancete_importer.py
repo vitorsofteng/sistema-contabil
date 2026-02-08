@@ -899,236 +899,18 @@ class ImportadorPDF(ImportadorBalanceteBase):
 
 
 # ============================================================================
-# IMPORTADOR EXCEL (XLS/XLSX)
-# ============================================================================
-
-class ImportadorExcel(ImportadorBalanceteBase):
-    """Importador de balancetes em formato Excel."""
-    
-    def importar(self, caminho: str) -> ResultadoImportacao:
-        """Importa balancete de arquivo Excel."""
-        try:
-            dados_planilha = self._ler_planilha(caminho)
-            
-            if not dados_planilha:
-                return ResultadoImportacao(
-                    sucesso=False,
-                    mensagem="Não foi possível ler o arquivo Excel"
-                )
-            
-            return self._processar_planilha(dados_planilha, caminho)
-            
-        except Exception as e:
-            return ResultadoImportacao(
-                sucesso=False,
-                mensagem=f"Erro ao importar Excel: {str(e)}",
-                erros=[str(e)]
-            )
-    
-    def _ler_planilha(self, caminho: str) -> Optional[List[List]]:
-        """Lê dados da planilha Excel."""
-        dados = None
-        
-        # Tentar openpyxl (xlsx)
-        try:
-            from openpyxl import load_workbook
-            wb = load_workbook(caminho, data_only=True)
-            ws = wb.active
-            dados = []
-            for row in ws.iter_rows():
-                dados.append([cell.value for cell in row])
-            wb.close()
-            if dados:
-                return dados
-        except:
-            pass
-        
-        # Tentar xlrd (xls antigo)
-        try:
-            import xlrd
-            wb = xlrd.open_workbook(caminho)
-            ws = wb.sheet_by_index(0)
-            dados = []
-            for row_idx in range(ws.nrows):
-                dados.append([ws.cell_value(row_idx, col) for col in range(ws.ncols)])
-            if dados:
-                return dados
-        except:
-            pass
-        
-        # Tentar pandas como fallback
-        try:
-            import pandas as pd
-            df = pd.read_excel(caminho, header=None)
-            dados = df.values.tolist()
-            if dados:
-                return dados
-        except:
-            pass
-        
-        return dados
-    
-    def _processar_planilha(self, dados: List[List], caminho: str) -> ResultadoImportacao:
-        """Processa dados da planilha."""
-        self.avisos = []
-        self.erros = []
-        
-        # Converter para texto para extrair metadados
-        texto_completo = "\n".join(
-            " ".join(str(c) if c else "" for c in row)
-            for row in dados
-        )
-        
-        # Extrair dados básicos
-        cnpj = self.parser.extrair_cnpj(texto_completo)
-        if not cnpj:
-            return ResultadoImportacao(
-                sucesso=False,
-                mensagem="CNPJ não encontrado no documento"
-            )
-        
-        nome_empresa = self.parser.extrair_nome_empresa(texto_completo)
-        if not nome_empresa:
-            self.avisos.append("Nome da empresa não identificado")
-            nome_empresa = "EMPRESA NÃO IDENTIFICADA"
-        
-        periodo_inicio, periodo_fim = self.parser.extrair_periodo(texto_completo)
-        if not periodo_inicio or not periodo_fim:
-            self.avisos.append("Período não identificado")
-            periodo_fim = date.today()
-            periodo_inicio = periodo_fim.replace(day=1)
-        
-        contador_nome, contador_crc, contador_cpf = self.parser.extrair_contador(texto_completo)
-        sistema = self.parser.extrair_sistema(texto_completo)
-        
-        # Criar estruturas
-        empresa = DadosEmpresa(
-            nome=nome_empresa,
-            cnpj=cnpj,
-            contador_nome=contador_nome,
-            contador_crc=contador_crc,
-            contador_cpf=contador_cpf
-        )
-        
-        balancete = DadosBalancete(
-            empresa=empresa,
-            periodo_inicio=periodo_inicio,
-            periodo_fim=periodo_fim,
-            arquivo_origem=os.path.basename(caminho),
-            hash_arquivo=self._calcular_hash(caminho),
-            sistema_origem=sistema or "Desconhecido"
-        )
-        
-        # Extrair contas das linhas
-        self._extrair_contas_planilha(dados, balancete)
-        
-        # Calcular derivados
-        self._calcular_derivados(balancete)
-        
-        return ResultadoImportacao(
-            sucesso=True,
-            mensagem=f"Balancete importado com sucesso: {nome_empresa}",
-            dados=balancete,
-            avisos=self.avisos,
-            erros=self.erros
-        )
-    
-    def _extrair_contas_planilha(self, dados: List[List], balancete: DadosBalancete):
-        """Extrai contas da planilha."""
-        for row in dados:
-            if not row or len(row) < 4:
-                continue
-            
-            # Primeira coluna geralmente é código
-            codigo = str(row[0]).strip() if row[0] else ""
-            
-            # Pular linhas sem código numérico
-            if not codigo or not re.match(r'^\d+$', codigo):
-                continue
-            
-            # Segunda coluna é descrição
-            descricao = str(row[1]).strip() if len(row) > 1 and row[1] else ""
-            
-            if not descricao:
-                continue
-            
-            # Colunas de valores (ordem padrão: saldo_ant, débito, crédito, saldo_atual)
-            valores = []
-            for i in range(2, min(6, len(row))):
-                val = row[i] if len(row) > i else 0
-                valores.append(self._parse_valor_celula(val))
-            
-            while len(valores) < 4:
-                valores.append(0.0)
-            
-            # Verificar natureza na última coluna
-            natureza = ''
-            if len(row) > 6:
-                nat = str(row[6]).strip().upper() if row[6] else ''
-                if nat in ['D', 'C']:
-                    natureza = nat
-            
-            conta = ContaContabil(
-                codigo=codigo,
-                descricao=descricao,
-                saldo_anterior=valores[0],
-                debito=valores[1],
-                credito=valores[2],
-                saldo_atual=valores[3],
-                natureza=natureza,
-                tipo=self.parser.classificar_tipo_conta(codigo, descricao)
-            )
-            
-            self._processar_conta(balancete, conta)
-    
-    def _parse_valor_celula(self, valor) -> float:
-        """Converte valor de célula para float."""
-        if valor is None:
-            return 0.0
-        
-        if isinstance(valor, (int, float)):
-            return abs(float(valor))
-        
-        return self.parser.parse_valor_brasileiro(str(valor))
-
-
-# ============================================================================
-# IMPORTADOR CSV
+# IMPORTADOR CSV (STUB - sistema aceita apenas PDF)
 # ============================================================================
 
 class ImportadorCSV(ImportadorBalanceteBase):
-    """Importador de balancetes em formato CSV."""
+    """Importador de balancetes em formato CSV (desabilitado - use PDF)."""
     
     def importar(self, caminho: str) -> ResultadoImportacao:
-        """Importa balancete de arquivo CSV."""
-        try:
-            import csv
-            
-            # Detectar delimitador
-            with open(caminho, 'r', encoding='utf-8-sig') as f:
-                amostra = f.read(4096)
-                dialect = csv.Sniffer().sniff(amostra, delimiters=';,\t')
-                f.seek(0)
-                reader = csv.reader(f, dialect)
-                dados = list(reader)
-            
-            if not dados:
-                return ResultadoImportacao(
-                    sucesso=False,
-                    mensagem="Arquivo CSV vazio"
-                )
-            
-            # Usar processador do Excel (mesmo formato)
-            importador_excel = ImportadorExcel()
-            importador_excel._calcular_hash = self._calcular_hash
-            return importador_excel._processar_planilha(dados, caminho)
-            
-        except Exception as e:
-            return ResultadoImportacao(
-                sucesso=False,
-                mensagem=f"Erro ao importar CSV: {str(e)}",
-                erros=[str(e)]
-            )
+        return ResultadoImportacao(
+            sucesso=False,
+            mensagem="Formato não suportado para balancetes. Use apenas PDF."
+        )
+
 
 
 # ============================================================================
@@ -1140,7 +922,6 @@ class GerenciadorImportacao:
     
     def __init__(self, repositorio_empresas=None):
         self.importador_pdf = ImportadorPDF()
-        self.importador_excel = ImportadorExcel()
         self.importador_csv = ImportadorCSV()
         self.repositorio = repositorio_empresas
     
@@ -1166,14 +947,12 @@ class GerenciadorImportacao:
         
         if extensao == '.pdf':
             resultado = self.importador_pdf.importar(caminho)
-        elif extensao in ['.xls', '.xlsx', '.xlsm']:
-            resultado = self.importador_excel.importar(caminho)
         elif extensao == '.csv':
             resultado = self.importador_csv.importar(caminho)
         else:
             return ResultadoImportacao(
                 sucesso=False,
-                mensagem=f"Formato não suportado: {extensao}. Use PDF, XLS, XLSX ou CSV."
+                mensagem=f"Formato não suportado: {extensao}. Use apenas PDF."
             )
         
         # Processar empresa se importação ok

@@ -1,98 +1,97 @@
-# Sistema de Gestão Contábil v2.9.0
+# Kontabil - Análise Financeira Inteligente
 
-## 🚀 Início Rápido com Docker
+Sistema completo de análise financeira para contadores e empresas.
+
+## 🚀 Início Rápido
 
 ```bash
-# Descompacte e entre na pasta
-unzip contabil_system.zip
-cd contabil_system
+# Clone o repositório
+git clone https://github.com/seu-usuario/kontabil.git
+cd kontabil
 
-# Execute o script (resolve rate limit automaticamente)
-chmod +x docker-run.sh
-./docker-run.sh
+# Execute o setup
+chmod +x setup.sh
+./setup.sh
+
+# Ou manualmente com Docker
+docker-compose up -d
 ```
-
-O script vai:
-1. ✅ Verificar se você está logado no Docker Hub
-2. ✅ Se não estiver, oferece fazer login (resolve rate limit)
-3. ✅ Baixar todas as imagens necessárias
-4. ✅ Iniciar o sistema completo
 
 ## 📍 URLs
 
 | Serviço | URL |
 |---------|-----|
-| **Frontend** | http://localhost |
+| **Frontend** | http://localhost:3000 |
 | **Backend** | http://localhost:8000 |
 | **API Docs** | http://localhost:8000/docs |
+
+## 🎯 Funcionalidades
+
+### Análise Financeira
+- 📊 Dashboard com indicadores em tempo real
+- 📈 8 índices de liquidez (Corrente, Seca, Imediata, Geral, etc.)
+- 💰 DRE automático com margens
+- 🎯 Análise de Break-Even Point
+- 📉 Projeções financeiras
+
+### Gestão
+- 🏢 Multi-empresas (gerencie vários clientes)
+- 🔔 Sistema de alertas inteligentes
+- 📁 Importação de dados (XLSX, CSV)
+- 👥 Multi-tenancy (isolamento por contador)
+
+### Relatórios
+- 📄 PDF profissional (ABNT)
+- 📊 Excel com gráficos
+- 🎨 Configuração de cores e logo
+- 📧 Envio por email (em breve)
 
 ## 📋 Comandos Úteis
 
 ```bash
-# Ver logs
-docker-compose logs -f
+# Desenvolvimento
+make dev          # Inicia ambiente
+make logs         # Ver logs
+make test         # Executar testes
 
-# Ver logs de um serviço específico
-docker-compose logs -f backend
-docker-compose logs -f frontend
+# Deploy
+make deploy-staging   # Homologação
+make deploy-prod      # Produção
 
-# Parar tudo
-docker-compose down
-
-# Reiniciar
-docker-compose restart
-
-# Rebuild completo
-docker-compose down
-docker-compose build --no-cache
-docker-compose up -d
+# Banco de dados
+make migrate      # Executar migrations
+make backup-db    # Criar backup
 ```
 
-## 🔐 Criar Conta
+## 🔧 Variáveis de Ambiente
 
-Acesse http://localhost e clique em "Criar Conta" para se registrar.
+```env
+# Backend
+DATABASE_URL=postgresql://user:pass@db:5432/kontabil
+JWT_SECRET=sua-chave-secreta-aqui
+ENVIRONMENT=development
 
-## 🐛 Solução de Problemas
-
-### Erro "429 Too Many Requests" (Rate Limit)
-
-```bash
-# Faça login no Docker Hub (gratuito)
-docker login
-
-# Depois execute novamente
-./docker-run.sh
+# Email (para recuperação de senha)
+RESEND_API_KEY=re_xxxx
+EMAIL_FROM=noreply@kontabil.com.br
 ```
 
-### Containers não iniciam
+## 📦 Stack Tecnológica
 
-```bash
-# Veja os logs
-docker-compose logs
+- **Frontend**: React + Vite + Tailwind CSS
+- **Backend**: Python + FastAPI
+- **Banco**: PostgreSQL
+- **Cache**: Redis
+- **Deploy**: Docker + Railway/VPS
 
-# Reinicie do zero
-docker-compose down -v
-./docker-run.sh
-```
+## 🤝 Contribuição
 
-### Porta 80 em uso
-
-```bash
-# Veja o que está usando
-sudo lsof -i :80
-
-# Ou mude a porta no docker-compose.yml
-# De: "80:3000"
-# Para: "3000:3000"
-# E acesse http://localhost:3000
-```
-
-## 🎯 Funcionalidades
-
-- **F01-F05**: Auth, Database, Multi-Tenancy, Billing, Importação
-- **F08-F10**: Dashboard, Relatórios, Alertas
-- **F12**: Análise Financeira Avançada (DRE, Índices, Break-Even, Projeções, Benchmarks)
+1. Fork o projeto
+2. Crie uma branch (`git checkout -b feature/nova-funcionalidade`)
+3. Commit suas mudanças (`git commit -m 'feat: adiciona nova funcionalidade'`)
+4. Push para a branch (`git push origin feature/nova-funcionalidade`)
+5. Abra um Pull Request
 
 ## 📄 Licença
 
-MIT
+MIT © Kontabil

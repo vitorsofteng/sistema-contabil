@@ -297,50 +297,93 @@ class ContabilAnalyzer:
         
         saldo_atual = records[-1].caixa
         
-        # Burn rate
+        # Calcular variações mensais de caixa
         variacoes = []
         for i in range(1, n):
             variacoes.append(records[i].caixa - records[i-1].caixa)
         
-        burn_rate = np.mean(variacoes) if variacoes else 0
+        # Tendência de caixa (média das variações)
+        variacao_media = np.mean(variacoes) if variacoes else 0
         
-        # Runway
-        if burn_rate < 0 and saldo_atual > 0:
-            runway = int(saldo_atual / abs(burn_rate))
-            despesa_media = np.mean([r.despesas_totais + r.custos for r in records])
-            caixa_critico = despesa_media * self.caixa_critico_meses
-            meses_ate_aperto = max(0, int((saldo_atual - caixa_critico) / abs(burn_rate)))
+        # Burn rate = consumo mensal médio (apenas quando há queima de caixa)
+        # Burn rate é sempre positivo por definição - representa CONSUMO
+        variacoes_negativas = [abs(v) for v in variacoes if v < 0]
+        burn_rate = np.mean(variacoes_negativas) if variacoes_negativas else 0
+        
+        # Determinar tendência de caixa
+        if variacao_media > 0:
+            tendencia_caixa = "crescendo"
+        elif variacao_media < 0:
             tendencia_caixa = "caindo"
         else:
-            runway = 999
-            meses_ate_aperto = 999
-            tendencia_caixa = "crescendo" if burn_rate > 0 else "estavel"
+            tendencia_caixa = "estavel"
         
-        # Liquidez
+        # Runway (meses até acabar o caixa)
+        if burn_rate > 0 and saldo_atual > 0:
+            runway = int(saldo_atual / burn_rate)
+            despesa_media = np.mean([r.despesas_totais + r.custos for r in records])
+            caixa_critico = despesa_media * self.caixa_critico_meses
+            meses_ate_aperto = max(0, int((saldo_atual - caixa_critico) / burn_rate)) if burn_rate > 0 else 999
+        else:
+            runway = 999  # Sem queima de caixa
+            meses_ate_aperto = 999
+        
+        # Liquidez corrente - usar dados reais do balanço se disponíveis
         r = records[-1]
-        ativo_circ = r.caixa
-        passivo_circ = r.custos * 0.3  # Estimativa
+        ativo_circ = r.caixa  # Mínimo: caixa disponível
+        
+        # Tentar obter AC e PC reais do registro (se importados do balanço)
+        ac_real = getattr(r, 'ativo_circulante', 0) if hasattr(r, 'ativo_circulante') else 0
+        pc_real = getattr(r, 'passivo_circulante', 0) if hasattr(r, 'passivo_circulante') else 0
+        
+        if ac_real > 0:
+            ativo_circ = ac_real
+        
+        # Se não temos PC real, estimar de forma conservadora
+        if pc_real > 0:
+            passivo_circ = pc_real
+        else:
+            # Estimativa conservadora: fornecedores + obrigações de curto prazo
+            fornecedores = getattr(r, 'fornecedores', 0) if hasattr(r, 'fornecedores') else 0
+            if fornecedores > 0:
+                passivo_circ = fornecedores
+            else:
+                # Último recurso: média de 2 meses de custos + despesas
+                passivo_circ = (r.custos + r.despesas_totais) * 2 / 12 * 2 if r.custos > 0 else r.custos * 0.3
+        
         liquidez = ativo_circ / passivo_circ if passivo_circ > 0 else 999
         capital_giro = ativo_circ - passivo_circ
         
-        # Nível de risco
-        if runway < 3 or meses_ate_aperto < 1:
-            nivel = NivelRisco.CRITICO
-        elif runway < 6 or meses_ate_aperto < 3:
-            nivel = NivelRisco.ALTO
-        elif runway < 12 or meses_ate_aperto < 6:
-            nivel = NivelRisco.MODERADO
-        elif burn_rate < 0:
-            nivel = NivelRisco.BAIXO
+        # Nível de risco - considera tendência E runway
+        if tendencia_caixa == "caindo":
+            if runway < 3 or meses_ate_aperto < 1:
+                nivel = NivelRisco.CRITICO
+            elif runway < 6 or meses_ate_aperto < 3:
+                nivel = NivelRisco.ALTO
+            elif runway < 12 or meses_ate_aperto < 6:
+                nivel = NivelRisco.MODERADO
+            else:
+                nivel = NivelRisco.BAIXO
         else:
-            nivel = NivelRisco.MINIMO
+            # Caixa estável ou crescendo
+            if liquidez < 0.5:
+                nivel = NivelRisco.ALTO
+            elif liquidez < 1.0:
+                nivel = NivelRisco.MODERADO
+            elif liquidez < 1.5:
+                nivel = NivelRisco.BAIXO
+            else:
+                nivel = NivelRisco.MINIMO
         
         # Descrição
         if nivel in [NivelRisco.CRITICO, NivelRisco.ALTO]:
-            descricao = f"Consumindo R$ {abs(burn_rate):,.0f}/mês. Runway de {min(runway, 99)} meses."
+            if burn_rate > 0:
+                descricao = f"Consumindo R$ {burn_rate:,.0f}/mês. Runway de {min(runway, 99)} meses."
+            else:
+                descricao = f"Caixa baixo com saldo de R$ {saldo_atual:,.0f}. Liquidez de {liquidez:.2f}."
             recomendacao = "AÇÃO IMEDIATA: Buscar capital, renegociar prazos, cortar custos."
-        elif burn_rate < 0:
-            descricao = f"Consumo de R$ {abs(burn_rate):,.0f}/mês, mas com margem de {min(runway, 99)} meses."
+        elif tendencia_caixa == "caindo":
+            descricao = f"Consumo de R$ {burn_rate:,.0f}/mês, mas com margem de {min(runway, 99)} meses."
             recomendacao = "Monitorar evolução e buscar reverter queima de caixa."
         else:
             descricao = f"Caixa saudável com saldo de R$ {saldo_atual:,.0f} e geração positiva."
@@ -353,7 +396,7 @@ class ContabilAnalyzer:
             runway_meses=min(runway, 999),
             meses_ate_aperto=min(meses_ate_aperto, 999),
             tendencia_caixa=tendencia_caixa,
-            liquidez_corrente=round(liquidez, 2),
+            liquidez_corrente=round(liquidez, 2) if liquidez < 100 else 0,
             capital_giro=round(capital_giro, 2),
             confianca=85 if n >= 12 else 70,
             descricao=descricao,

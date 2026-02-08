@@ -21,14 +21,16 @@ from typing import Optional, Dict, Tuple, Any
 from dataclasses import dataclass
 from enum import Enum
 
-# Tenta importar bibliotecas de segurança (instaladas via requirements.txt no Docker)
+# Bibliotecas de segurança são OBRIGATÓRIAS
 try:
     from passlib.context import CryptContext
     from jose import JWTError, jwt
     CRYPTO_AVAILABLE = True
 except ImportError:
-    CRYPTO_AVAILABLE = False
-    print("⚠️ Bibliotecas de criptografia não disponíveis. Usando fallback SHA256.")
+    raise RuntimeError(
+        "ERRO FATAL: Bibliotecas de criptografia não encontradas. "
+        "Execute: pip install passlib python-jose[cryptography] bcrypt"
+    )
 
 
 # =============================================================================
@@ -38,12 +40,26 @@ except ImportError:
 class AuthConfig:
     """Configurações de autenticação."""
     
-    # JWT
-    SECRET_KEY = os.environ.get('SECRET_KEY', secrets.token_urlsafe(32))
-    REFRESH_SECRET_KEY = os.environ.get('REFRESH_SECRET_KEY', secrets.token_urlsafe(32))
+    # JWT - chaves DEVEM ser definidas via variáveis de ambiente
+    SECRET_KEY = os.environ.get('SECRET_KEY', '')
+    REFRESH_SECRET_KEY = os.environ.get('REFRESH_SECRET_KEY', '')
+    
+    # Validação: falha ruidosamente se não configurado (exceto dev local)
+    _env = os.environ.get('ENVIRONMENT', 'development')
+    if _env != 'development' and (not SECRET_KEY or len(SECRET_KEY) < 32):
+        raise RuntimeError(
+            "ERRO FATAL: SECRET_KEY não definida ou muito curta. "
+            "Gere com: python -c \"import secrets; print(secrets.token_urlsafe(64))\""
+        )
+    if not SECRET_KEY:
+        # Fallback FIXO para desenvolvimento local (não aleatório!)
+        SECRET_KEY = 'dev-only-secret-key-do-not-use-in-production-1234567890'
+    if not REFRESH_SECRET_KEY:
+        REFRESH_SECRET_KEY = 'dev-only-refresh-key-do-not-use-in-production-1234567890'
+    
     ALGORITHM = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES = 15
-    REFRESH_TOKEN_EXPIRE_DAYS = 7
+    ACCESS_TOKEN_EXPIRE_MINUTES = 480  # 8 horas
+    REFRESH_TOKEN_EXPIRE_DAYS = 30     # 30 dias
     
     # Rate Limiting
     MAX_LOGIN_ATTEMPTS = 5
@@ -94,19 +110,7 @@ if CRYPTO_AVAILABLE:
             return True  # SHA256 precisa migrar para bcrypt
         return pwd_context.needs_update(hashed_password)
 
-else:
-    # Fallback para SHA256
-    def hash_password(password: str) -> str:
-        """Gera hash da senha usando SHA256 (fallback)."""
-        return hashlib.sha256(password.encode()).hexdigest()
-    
-    def verify_password(plain_password: str, hashed_password: str) -> bool:
-        """Verifica se a senha confere com o hash."""
-        return hashlib.sha256(plain_password.encode()).hexdigest() == hashed_password
-    
-    def needs_rehash(hashed_password: str) -> bool:
-        """Verifica se o hash precisa ser atualizado."""
-        return False
+
 
 
 # =============================================================================
@@ -244,25 +248,7 @@ if CRYPTO_AVAILABLE:
         except JWTError:
             return None
 
-else:
-    # Fallback simples (tokens como strings aleatórias)
-    def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
-        return secrets.token_urlsafe(32)
-    
-    def create_refresh_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
-        return secrets.token_urlsafe(32)
-    
-    def create_reset_token(user_id: int) -> str:
-        return secrets.token_urlsafe(32)
-    
-    def decode_access_token(token: str) -> Optional[Dict]:
-        return {"jti": token, "sub": None}
-    
-    def decode_refresh_token(token: str) -> Optional[Dict]:
-        return {"jti": token, "sub": None}
-    
-    def decode_reset_token(token: str) -> Optional[Dict]:
-        return {"jti": token, "sub": None}
+
 
 
 # =============================================================================

@@ -230,7 +230,8 @@ class AnalyzerProfissional:
         if ll == 0 and rb > 0:
             custos_val = float(dados.get('custos_total') or dados.get('custos') or 0)
             desp_val = float(dados.get('despesas_operacionais') or dados.get('despesas') or 0)
-            imp_val = float(dados.get('impostos_total') or dados.get('deducoes_receita') or dados.get('impostos') or 0)
+            # CORRIGIDO: Priorizar 'impostos' (calculado pelo parser) sobre 'deducoes_receita'
+            imp_val = float(dados.get('impostos') or dados.get('impostos_total') or dados.get('deducoes_receita') or 0)
             ll = rb - custos_val - desp_val - imp_val
         
         at = float(dados.get('ativo_total') or dados.get('ativo_circulante') or 0)
@@ -238,13 +239,53 @@ class AnalyzerProfissional:
         pc = float(dados.get('passivo_circulante') or 0)
         pnc = float(dados.get('passivo_nao_circulante') or 0)
         pl = float(dados.get('patrimonio_liquido') or dados.get('capital_social') or 0)
+        
+        # =================================================================
+        # VALIDAÇÃO DO ATIVO TOTAL PARA ROA CORRETO
+        # =================================================================
+        # Problema comum: ativo_total pode estar zerado ou com valor incorreto
+        # Se ativo_circulante > ativo_total, usar ativo_circulante
+        if ac > at and ac > 0:
+            at = ac
+        
+        # Se ativo_total parece muito pequeno (menor que PL), algo está errado
+        # O ativo deve ser >= passivo + patrimônio
+        if at > 0 and pl > 0 and at < pl:
+            # ativo menor que patrimônio indica problema
+            # usar ativo_circulante se disponível e maior
+            if ac > at:
+                at = ac
+        
+        # Se ainda não temos ativo_total mas temos passivo + PL, calcular
+        if at == 0 and (pc + pnc + pl) > 0:
+            at = pc + pnc + pl
         disp = float(dados.get('disponivel') or dados.get('caixa') or 0)
         est = float(dados.get('estoques') or 0)
         clientes = float(dados.get('clientes') or dados.get('duplicatas_receber') or 0)
         fornecedores = float(dados.get('fornecedores') or 0)
         custos = float(dados.get('custos_total') or dados.get('custos') or 0)
         desp = float(dados.get('despesas_operacionais') or dados.get('despesas') or 0)
-        impostos = float(dados.get('impostos_total') or dados.get('deducoes_receita') or dados.get('impostos') or 0)
+        
+        # CORREÇÃO DEFINITIVA: Calcular impostos corretamente
+        # 1. Primeiro, somar impostos individuais
+        iss_val = float(dados.get('iss_deducao') or dados.get('iss') or 0)
+        pis_val = float(dados.get('pis_deducao') or dados.get('pis') or 0)
+        cofins_val = float(dados.get('cofins_deducao') or dados.get('cofins') or 0)
+        irpj_val = float(dados.get('irpj_deducao') or dados.get('irpj') or 0)
+        csll_val = float(dados.get('csll_deducao') or dados.get('csll') or 0)
+        icms_val = float(dados.get('icms_deducao') or dados.get('icms') or 0)
+        soma_individuais = iss_val + pis_val + cofins_val + irpj_val + csll_val + icms_val
+        
+        # 2. Pegar campo impostos/impostos_total
+        impostos_campo = float(dados.get('impostos') or dados.get('impostos_total') or dados.get('deducoes_receita') or 0)
+        
+        # 3. Se ICMS está zerado mas impostos > soma, deduzir ICMS
+        if icms_val == 0 and impostos_campo > soma_individuais:
+            icms_val = impostos_campo - soma_individuais
+            soma_individuais = impostos_campo
+        
+        # 4. Usar o maior valor disponível
+        impostos = max(soma_individuais, impostos_campo)
         
         # Liquidez
         if pc > 0:
