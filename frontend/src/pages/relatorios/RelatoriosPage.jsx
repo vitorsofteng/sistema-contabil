@@ -180,7 +180,7 @@ function RelatoriosPage({ onNavigate }) {
       />
 
       {/* Tabs */}
-      <div className="flex gap-1 mb-6 bg-slate-100 p-1 rounded-lg w-fit">
+      <div className="flex gap-1 mb-6 bg-slate-100 p-1 rounded-lg overflow-x-auto scrollbar-hide">
         {[
           { id: 'gerar', label: 'Gerar Relatório' },
           { id: 'config', label: 'Configuração' },

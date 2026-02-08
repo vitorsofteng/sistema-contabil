@@ -93,12 +93,12 @@ function DashboardPage({ onNavigate }) {
       />
       
       {/* Tabs */}
-      <div className="flex gap-1 mb-6 bg-slate-100 p-1 rounded-lg w-fit">
+      <div className="flex gap-1 mb-6 bg-slate-100 p-1 rounded-lg overflow-x-auto scrollbar-hide">
         {tabs.map(tab => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
-            className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+            className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors whitespace-nowrap ${
               activeTab === tab.id 
                 ? 'bg-white text-slate-900 shadow-sm' 
                 : 'text-slate-600 hover:text-slate-900'
@@ -248,15 +248,15 @@ function DashboardPage({ onNavigate }) {
         <div className="space-y-6">
           {/* Filtro de Empresa */}
           <Card className="p-4">
-            <div className="flex flex-wrap items-center gap-4">
+            <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-3 sm:gap-4">
               <div className="flex items-center gap-2">
-                <Filter className="w-5 h-5 text-slate-500" />
+                <Filter className="w-5 h-5 text-slate-500 flex-shrink-0" />
                 <span className="font-medium text-slate-700">Filtrar por empresa:</span>
               </div>
               <select
                 value={empresaFiltro}
                 onChange={(e) => setEmpresaFiltro(e.target.value)}
-                className="px-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none bg-white min-w-[200px]"
+                className="w-full sm:w-auto px-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none bg-white sm:min-w-[200px]"
               >
                 <option value="todas">📊 Todas as empresas (consolidado)</option>
                 {empresas.map(emp => (

@@ -515,7 +515,7 @@ function AlertasPage({ onNavigate }) {
                     </label>
                   </div>
                   {configEmpresa.alerta_caixa_ativo && (
-                    <div className="grid grid-cols-2 gap-4 mt-4 pt-4 border-t">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4 pt-4 border-t">
                       <div>
                         <div className="flex items-center gap-2 mb-2">
                           <AlertTriangle className="w-4 h-4 text-red-500" />
@@ -569,7 +569,7 @@ function AlertasPage({ onNavigate }) {
                     </label>
                   </div>
                   {configEmpresa.alerta_margem_ativo && (
-                    <div className="grid grid-cols-2 gap-4 mt-4 pt-4 border-t">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4 pt-4 border-t">
                       <div>
                         <div className="flex items-center gap-2 mb-2">
                           <Target className="w-4 h-4 text-green-600" />
@@ -625,7 +625,7 @@ function AlertasPage({ onNavigate }) {
                     </label>
                   </div>
                   {configEmpresa.alerta_score_ativo && (
-                    <div className="grid grid-cols-2 gap-4 mt-4 pt-4 border-t">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4 pt-4 border-t">
                       <div>
                         <div className="flex items-center gap-2 mb-2">
                           <AlertTriangle className="w-4 h-4 text-red-500" />

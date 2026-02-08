@@ -518,7 +518,7 @@ function IndicesLiquidezTab({ analise, formatMoney, formatPct }) {
                 </span>
               </div>
               
-              <div className="grid grid-cols-2 gap-4 my-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 my-4">
                 <div className="text-center p-3 bg-white rounded-lg">
                   <p className="text-2xl font-bold text-slate-800">{formatMoney(ncg)}</p>
                   <p className="text-xs text-slate-500">NCG</p>

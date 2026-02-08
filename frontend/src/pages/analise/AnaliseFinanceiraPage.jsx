@@ -98,9 +98,9 @@ function AnaliseFinanceiraPage({ empresaId, empresaNome, onBack }) {
   if (loading) return <LoadingScreen />;
   
   return (
-    <div className="p-6 space-y-6">
+    <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div className="flex items-center gap-4">
           {onBack && (
             <button onClick={onBack} className="p-2 hover:bg-slate-100 rounded-lg">
@@ -428,7 +428,7 @@ function AnaliseFinanceiraPage({ empresaId, empresaNome, onBack }) {
                     <p className="text-xs text-slate-500 mt-1">por mês</p>
                   </div>
                   
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="p-4 bg-blue-50 rounded-lg text-center">
                       <p className="text-sm text-blue-600 mb-1">Custo Fixo Mensal</p>
                       <p className="text-lg font-bold text-blue-800">{formatMoney(analise.break_even.custo_fixo_mensal)}</p>

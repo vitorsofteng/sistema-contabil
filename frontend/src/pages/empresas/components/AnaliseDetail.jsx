@@ -44,7 +44,7 @@ function AnaliseDetail({ analise }) {
         )}
 
         {/* Score e Status */}
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <Card className="p-6 text-center">
             <div className={`text-5xl font-bold mb-2 ${
               score >= 70 ? 'text-green-600' : score >= 50 ? 'text-yellow-600' : 'text-red-600'
@@ -266,7 +266,7 @@ function AnaliseDetail({ analise }) {
     <div className="space-y-6">
       <Card className="p-4">
         <h3 className="font-semibold text-slate-900 mb-4">Composição do Score</h3>
-        <div className="grid grid-cols-5 gap-4 text-center">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 text-center">
           {[{ label: 'Tendência', value: analise.score_tendencia, max: 25 },
             { label: 'Margem', value: analise.score_margem, max: 25 },
             { label: 'Caixa', value: analise.score_caixa, max: 25 },

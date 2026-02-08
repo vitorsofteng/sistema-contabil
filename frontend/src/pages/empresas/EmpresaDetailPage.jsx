@@ -127,25 +127,25 @@ function EmpresaDetailPage({ empresaId, onNavigate }) {
         title={empresa.razao_social}
         subtitle={empresa.cnpj}
         actions={
-          <div className="flex items-center gap-2">
-            <Button variant="ghost" onClick={() => onNavigate('empresas')}><ArrowLeft className="w-4 h-4" /> Voltar</Button>
-            <Button variant="secondary" onClick={() => setShowUpload(true)}><Upload className="w-4 h-4" /> Importar Dados</Button>
+          <div className="flex items-center gap-2 flex-wrap">
+            <Button variant="ghost" size="sm" onClick={() => onNavigate('empresas')}><ArrowLeft className="w-4 h-4" /> <span className="hidden sm:inline">Voltar</span></Button>
+            <Button variant="secondary" size="sm" onClick={() => setShowUpload(true)}><Upload className="w-4 h-4" /> <span className="hidden sm:inline">Importar</span><span className="sm:hidden">Importar</span></Button>
             <Button 
               variant="secondary" 
+              size="sm"
               onClick={() => onNavigate('analise-financeira', { empresaId: empresaId, empresaNome: empresa.razao_social })}
               disabled={registros.length < 1}
             >
-              <PieChartIcon className="w-4 h-4" /> DRE & Índices
+              <PieChartIcon className="w-4 h-4" /> <span className="hidden sm:inline">DRE & Índices</span><span className="sm:hidden">DRE</span>
             </Button>
-
           </div>
         }
       />
       
       {ultimaAnalise && (
         <Card className="p-4 mb-6">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
               <ScoreCircle score={ultimaAnalise.score} size="lg" />
               <div>
                 <StatusBadge status={ultimaAnalise.status} />
@@ -157,8 +157,7 @@ function EmpresaDetailPage({ empresaId, onNavigate }) {
                 variant="secondary" 
                 size="sm" 
                 onClick={() => setShowPdfMenu(!showPdfMenu)}
-                
-                className="flex items-center gap-1.5"
+                className="flex items-center gap-1.5 w-full sm:w-auto justify-center"
               >
                 <><Download className="w-4 h-4" /> Exportar PDF <ChevronDown className="w-3.5 h-3.5" /></>
               </Button>
@@ -195,11 +194,11 @@ function EmpresaDetailPage({ empresaId, onNavigate }) {
         </Card>
       )}
       
-      <div className="border-b border-slate-200 mb-6">
-        <nav className="flex gap-4">
+      <div className="border-b border-slate-200 mb-6 -mx-4 px-4 md:mx-0 md:px-0">
+        <nav className="flex gap-4 overflow-x-auto scrollbar-hide">
           {tabs.map(t => (
             <button key={t.id} onClick={() => setTab(t.id)}
-              className={`pb-3 px-1 text-sm font-medium border-b-2 transition-colors ${tab === t.id ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
+              className={`pb-3 px-1 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${tab === t.id ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
               {t.label}
             </button>
           ))}

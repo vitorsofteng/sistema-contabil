@@ -117,12 +117,12 @@ function NovaEmpresaPage({ onNavigate }) {
         <form onSubmit={handleSubmit} className="space-y-4">
           <Input label="Razão Social *" value={form.razao_social} onChange={e => setForm({...form, razao_social: e.target.value})} required />
           
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Input label="Nome Fantasia" value={form.nome_fantasia} onChange={e => setForm({...form, nome_fantasia: e.target.value})} />
             <Input label="CNPJ" value={form.cnpj} onChange={e => setForm({...form, cnpj: e.target.value})} placeholder="00.000.000/0000-00" />
           </div>
           
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Select label="Regime Tributário" options={regimes} value={form.regime_tributario} onChange={e => setForm({...form, regime_tributario: e.target.value})} />
             <Input label="Setor/Atividade" value={form.setor} onChange={e => setForm({...form, setor: e.target.value})} placeholder="Ex: Comércio, Serviços..." />
           </div>
@@ -198,12 +198,12 @@ function NovaEmpresaPage({ onNavigate }) {
             />
           )}
           
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Input label="Email" type="email" value={form.email} onChange={e => setForm({...form, email: e.target.value})} />
             <Input label="Telefone" value={form.telefone} onChange={e => setForm({...form, telefone: e.target.value})} />
           </div>
           
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <Input label="Cidade" value={form.cidade} onChange={e => setForm({...form, cidade: e.target.value})} className="col-span-2" />
             <Select label="Estado" options={estados} value={form.estado} onChange={e => setForm({...form, estado: e.target.value})} />
           </div>

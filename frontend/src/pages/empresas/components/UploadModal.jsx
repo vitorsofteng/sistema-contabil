@@ -169,7 +169,7 @@ function UploadModal({ isOpen, onClose, empresaId, onSuccess }) {
           </div>
           
           <div className="mb-4 p-4 bg-slate-50 rounded-lg">
-            <div className="grid grid-cols-2 gap-4 text-sm mb-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm mb-4">
               {resultadoIA.empresa_arquivo && (
                 <div><span className="text-slate-500">Empresa:</span> <strong>{resultadoIA.empresa_arquivo}</strong></div>
               )}
@@ -183,7 +183,7 @@ function UploadModal({ isOpen, onClose, empresaId, onSuccess }) {
             </div>
             
             <h4 className="font-medium text-slate-900 mb-2">Valores encontrados:</h4>
-            <div className="grid grid-cols-2 gap-2 text-sm max-h-48 overflow-y-auto">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm max-h-48 overflow-y-auto">
               {Object.entries(resultadoIA.dados || {})
                 .filter(([k, v]) => v && v > 0 && !['ano', 'mes'].includes(k))
                 .map(([campo, valor]) => (
@@ -237,7 +237,7 @@ function UploadModal({ isOpen, onClose, empresaId, onSuccess }) {
           
           <div className="mb-4 p-4 bg-slate-50 rounded-lg">
             <h4 className="font-medium text-slate-900 mb-2">Dados do arquivo:</h4>
-            <div className="grid grid-cols-2 gap-2 text-sm">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
               {resultadoIA.empresa_arquivo && <p><span className="text-slate-500">Empresa:</span> {resultadoIA.empresa_arquivo}</p>}
               <p><span className="text-slate-500">Campos:</span> {resultadoIA.campos_extraidos?.length || 0}</p>
               <p><span className="text-slate-500">Confiança:</span> <span className="capitalize">{resultadoIA.confianca}</span></p>

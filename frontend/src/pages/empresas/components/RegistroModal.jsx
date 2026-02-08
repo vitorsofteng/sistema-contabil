@@ -42,15 +42,15 @@ function RegistroModal({ isOpen, onClose, empresaId, onSuccess }) {
       {error && <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700">{error}</div>}
       <form onSubmit={handleSubmit} className="space-y-4">
         <Input label="Competência (AAAA-MM)" value={form.competencia} onChange={e => setForm({...form, competencia: e.target.value})} placeholder="2024-01" pattern="\d{4}-\d{2}" required />
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <Input label="Receita Bruta" type="number" step="0.01" value={form.receita_bruta} onChange={e => setForm({...form, receita_bruta: e.target.value})} required />
           <Input label="Custos" type="number" step="0.01" value={form.custos} onChange={e => setForm({...form, custos: e.target.value})} />
         </div>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <Input label="Despesas" type="number" step="0.01" value={form.despesas_operacionais} onChange={e => setForm({...form, despesas_operacionais: e.target.value})} />
           <Input label="Folha" type="number" step="0.01" value={form.folha_pagamento} onChange={e => setForm({...form, folha_pagamento: e.target.value})} />
         </div>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <Input label="Impostos" type="number" step="0.01" value={form.impostos} onChange={e => setForm({...form, impostos: e.target.value})} />
           <Input label="Saldo Caixa" type="number" step="0.01" value={form.saldo_caixa} onChange={e => setForm({...form, saldo_caixa: e.target.value})} />
         </div>
