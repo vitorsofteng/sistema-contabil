@@ -72,31 +72,25 @@ function EmpresasPage({ onNavigate }) {
               className="p-4 hover:shadow-md transition-shadow cursor-pointer"
               onClick={() => onNavigate('empresa', emp.id)}
             >
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <ScoreCircle score={emp.ultimo_score} size="md" />
-                  <div>
-                    <h3 className="font-semibold text-slate-900">{emp.razao_social}</h3>
-                    <div className="flex items-center gap-2 mt-1">
-                      {emp.cnpj && <span className="text-sm text-slate-500">{emp.cnpj}</span>}
-                      {emp.regime_tributario && (
-                        <Badge variant="info" size="sm">{emp.regime_tributario}</Badge>
-                      )}
-                    </div>
+              <div className="flex items-center gap-3">
+                <ScoreCircle score={emp.ultimo_score} size="md" />
+                <div className="flex-1 min-w-0">
+                  <h3 className="font-semibold text-slate-900 truncate">{emp.razao_social}</h3>
+                  <div className="flex items-center gap-2 mt-1 flex-wrap">
+                    {emp.cnpj && <span className="text-sm text-slate-500">{emp.cnpj}</span>}
+                    {emp.regime_tributario && (
+                      <Badge variant="info" size="sm">{emp.regime_tributario}</Badge>
+                    )}
                   </div>
-                </div>
-                <div className="flex items-center gap-4">
-                  <div className="text-right">
+                  <div className="flex items-center gap-2 mt-2 flex-wrap">
                     {emp.ultimo_status && <StatusBadge status={emp.ultimo_status} />}
-                    <p className="text-sm text-slate-500 mt-1">
-                      {emp.meses_dados} meses de dados
-                    </p>
+                    <span className="text-sm text-slate-500">{emp.meses_dados} meses</span>
+                    {emp.alertas_pendentes > 0 && (
+                      <Badge variant="danger">{emp.alertas_pendentes} alertas</Badge>
+                    )}
                   </div>
-                  {emp.alertas_pendentes > 0 && (
-                    <Badge variant="danger">{emp.alertas_pendentes} alertas</Badge>
-                  )}
-                  <ChevronRight className="w-5 h-5 text-slate-400" />
                 </div>
+                <ChevronRight className="w-5 h-5 text-slate-400 flex-shrink-0" />
               </div>
             </Card>
           ))}

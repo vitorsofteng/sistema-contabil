@@ -104,7 +104,7 @@ function EditEmpresaModal({ isOpen, onClose, empresa, onSuccess }) {
           required 
         />
         
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <Input 
             label="Nome Fantasia" 
             value={form.nome_fantasia} 
@@ -118,7 +118,7 @@ function EditEmpresaModal({ isOpen, onClose, empresa, onSuccess }) {
           />
         </div>
         
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <Select 
             label="Regime Tributário" 
             options={regimes} 
@@ -133,7 +133,7 @@ function EditEmpresaModal({ isOpen, onClose, empresa, onSuccess }) {
           />
         </div>
         
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <Input 
             label="Email" 
             type="email" 
@@ -147,7 +147,7 @@ function EditEmpresaModal({ isOpen, onClose, empresa, onSuccess }) {
           />
         </div>
         
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <Input 
             label="Cidade" 
             value={form.cidade} 

@@ -137,7 +137,7 @@ function ExportPanel() {
       />
       
       {/* Panel */}
-      <div className="fixed top-0 right-0 h-full w-80 bg-white shadow-2xl z-50 flex flex-col animate-slide-in">
+      <div className="fixed top-0 right-0 h-full w-full sm:w-80 bg-white shadow-2xl z-50 flex flex-col animate-slide-in">
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 bg-slate-50">
           <div className="flex items-center gap-2">

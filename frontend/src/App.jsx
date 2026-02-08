@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Loader2, CheckCircle, AlertTriangle } from 'lucide-react';
+import { Loader2, CheckCircle, AlertTriangle, Menu } from 'lucide-react';
 
 // Contexts
 import { AuthProvider, useAuth } from './contexts/AuthContext';
-import { ThemeProvider } from './contexts/ThemeContext';
+import { ThemeProvider, useTheme } from './contexts/ThemeContext';
 import { ToastProvider } from './contexts/ToastContext';
 import { ExportProvider } from './contexts/ExportContext';
 
@@ -25,9 +25,12 @@ import { API_URL } from './config/api';
 
 function AppContent() {
   const { user, loading, pendingVerification, completePendingVerification } = useAuth();
+  const themeCtx = useTheme();
+  const theme = themeCtx?.theme || {};
   const [page, setPage] = useState('dashboard');
   const [pageParams, setPageParams] = useState(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   
   const [emailVerifying, setEmailVerifying] = useState(false);
   const [emailVerifyResult, setEmailVerifyResult] = useState(null);
@@ -127,7 +130,7 @@ function AppContent() {
   
   if (!user) return <AuthPages />;
 
-  const navigate = (pageName, params = null) => { setPage(pageName); setPageParams(params); };
+  const navigate = (pageName, params = null) => { setPage(pageName); setPageParams(params); setMobileMenuOpen(false); };
 
   const renderPage = () => {
     switch (page) {
@@ -151,8 +154,22 @@ function AppContent() {
   return (
     <ExportProvider>
       <div className="min-h-screen bg-slate-50">
-        <Sidebar currentPage={page} onNavigate={navigate} collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
-        <main className={`transition-all ${sidebarCollapsed ? 'ml-16' : 'ml-64'} p-6`}>{renderPage()}</main>
+        <Sidebar 
+          currentPage={page} 
+          onNavigate={navigate} 
+          collapsed={sidebarCollapsed} 
+          onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} 
+          mobileOpen={mobileMenuOpen}
+          onMobileClose={() => setMobileMenuOpen(false)}
+        />
+        {/* Mobile top bar */}
+        <div className="md:hidden fixed top-0 left-0 right-0 h-14 bg-white border-b border-slate-200 flex items-center px-4 z-30">
+          <button onClick={() => setMobileMenuOpen(true)} className="p-2 -ml-2 hover:bg-slate-100 rounded-lg">
+            <Menu className="w-5 h-5 text-slate-700" />
+          </button>
+          <span className="ml-2 font-semibold text-slate-900 truncate">{theme?.nome_escritorio || 'Kontabil'}</span>
+        </div>
+        <main className={`transition-all pt-14 md:pt-0 ${sidebarCollapsed ? 'md:ml-16' : 'md:ml-64'} p-4 md:p-6`}>{renderPage()}</main>
         <ExportPanel />
       </div>
     </ExportProvider>
