@@ -484,14 +484,28 @@ class PDFGeneratorPro:
         if result.get('score') is not None: ind['score'] = result.get('score')
         return self._gerar_pdf(empresa, ind, self._gerar_insights(ind), parecer_ia=parecer_ia)
     
-    def gerar_relatorio(self, empresa, dados_mensais, analise=None, alertas=None, config=None, parecer_ia=None):
-        ind = self._calcular_indicadores(dados_mensais)
+    def gerar_relatorio(self, empresa, dados_mensais, analise=None, alertas=None, config=None, parecer_ia=None, indicadores=None):
+        ind = indicadores if indicadores else self._calcular_indicadores(dados_mensais)
         if analise and analise.get('score') is not None: ind['score'] = analise.get('score')
         return self._gerar_pdf(empresa, ind, self._gerar_insights(ind), parecer_ia=parecer_ia)
     
-    def calcular_indicadores_publico(self, dados_mensais):
-        """Expõe o cálculo de indicadores para uso externo (parecer IA)."""
-        return self._calcular_indicadores(dados_mensais)
+    def calcular_indicadores_com_analise(self, dados_mensais, analise=None):
+        """Calcula indicadores e sobrescreve score/status da análise oficial."""
+        ind = self._calcular_indicadores(dados_mensais)
+        if analise:
+            resultado = analise.get('resultado_completo') or analise.get('resultado') or {}
+            if analise.get('score') is not None:
+                ind['score'] = analise['score']
+            if analise.get('status'):
+                ind['status'] = analise['status']
+            # Sobrescrever indicadores da análise oficial quando disponíveis
+            ind_analise = resultado.get('indicadores', {})
+            for key in ['liquidez_corrente', 'liquidez_seca', 'liquidez_imediata',
+                        'endividamento_geral', 'margem_bruta', 'margem_liquida', 'margem_operacional',
+                        'roe', 'roa', 'carga_tributaria', 'giro_ativo', 'ebitda', 'margem_ebitda']:
+                if key in ind_analise and ind_analise[key]:
+                    ind[key] = ind_analise[key]
+        return ind
     
     def _gerar_pdf(self, empresa, ind, insights, parecer_ia=None):
         buffer = io.BytesIO()
@@ -920,5 +934,5 @@ class PDFGeneratorPro:
         
         el.append(Spacer(1, 0.5*cm))
         return el
-def gerar_pdf(empresa, dados_mensais, analise=None, config=None, alertas=None, parecer_ia=None):
-    return PDFGeneratorPro(config).gerar_relatorio(empresa, dados_mensais, analise, alertas, config, parecer_ia=parecer_ia)
+def gerar_pdf(empresa, dados_mensais, analise=None, config=None, alertas=None, parecer_ia=None, indicadores=None):
+    return PDFGeneratorPro(config).gerar_relatorio(empresa, dados_mensais, analise, alertas, config, parecer_ia=parecer_ia, indicadores=indicadores)

@@ -2467,7 +2467,7 @@ async def get_pdf(id: int, aid: int, user: Dict = Depends(get_user), parecer_ia:
     if parecer_ia:
         try:
             from engine.parecer_ia import gerar_parecer
-            indicadores = pdf_generator.calcular_indicadores_publico(dados_mensais)
+            indicadores = pdf_generator.calcular_indicadores_com_analise(dados_mensais, analise)
             texto_parecer = gerar_parecer(emp, indicadores)
         except Exception as e:
             logger.error(f"Erro ao gerar parecer: {type(e).__name__}")
@@ -2517,7 +2517,7 @@ async def get_ultimo_pdf(id: int, user: Dict = Depends(get_user), parecer_ia: bo
     if parecer_ia:
         try:
             from engine.parecer_ia import gerar_parecer
-            indicadores = pdf_generator.calcular_indicadores_publico(dados_mensais)
+            indicadores = pdf_generator.calcular_indicadores_com_analise(dados_mensais, analise)
             texto_parecer = gerar_parecer(emp, indicadores)
         except Exception as e:
             logger.error(f"Erro ao gerar parecer: {type(e).__name__}")
@@ -3770,12 +3770,13 @@ async def gerar_relatorio_pdf(
     
     # Gerar parecer consultivo (se solicitado)
     texto_parecer = None
+    indicadores_calculados = None
     if parecer_ia:
         try:
             from engine.parecer_ia import gerar_parecer
             from reports.pdf_generator_pro import PDFGeneratorPro
-            indicadores = PDFGeneratorPro().calcular_indicadores_publico(dados_mensais)
-            texto_parecer = gerar_parecer(empresa, indicadores)
+            indicadores_calculados = PDFGeneratorPro().calcular_indicadores_com_analise(dados_mensais, ultima_analise)
+            texto_parecer = gerar_parecer(empresa, indicadores_calculados)
         except Exception as e:
             logger.error(f"Erro ao gerar parecer: {type(e).__name__}")
     
@@ -3787,7 +3788,8 @@ async def gerar_relatorio_pdf(
             analise=ultima_analise,
             config=config,
             alertas=alertas,
-            parecer_ia=texto_parecer
+            parecer_ia=texto_parecer,
+            indicadores=indicadores_calculados
         )
     except ImportError as e:
         raise HTTPException(status_code=501, detail=f"Gerador PDF não disponível: {str(e)}")
@@ -4156,12 +4158,13 @@ def _processar_exportacao(exportacao_id: int):
         # ── PDF / PDF com Parecer ──
         if tipo in ('pdf', 'pdf_parecer'):
             texto_parecer = None
+            indicadores_calculados = None
             if tipo == 'pdf_parecer':
                 try:
                     from engine.parecer_ia import gerar_parecer
                     from reports.pdf_generator_pro import PDFGeneratorPro
-                    indicadores = PDFGeneratorPro().calcular_indicadores_publico(dados_mensais)
-                    texto_parecer = gerar_parecer(empresa, indicadores)
+                    indicadores_calculados = PDFGeneratorPro(config).calcular_indicadores_com_analise(dados_mensais, ultima_analise)
+                    texto_parecer = gerar_parecer(empresa, indicadores_calculados)
                 except Exception as e:
                     logger.error(f"Erro ao gerar parecer: {type(e).__name__}")
             
@@ -4172,7 +4175,8 @@ def _processar_exportacao(exportacao_id: int):
                 analise=ultima_analise,
                 config=config,
                 alertas=alertas,
-                parecer_ia=texto_parecer
+                parecer_ia=texto_parecer,
+                indicadores=indicadores_calculados
             )
             _salvar_cache_relatorio(empresa_id, contador_id, tipo, arquivo_bytes)
         
