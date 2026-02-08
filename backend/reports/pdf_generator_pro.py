@@ -476,19 +476,24 @@ class PDFGeneratorPro:
                 'texto': f"Carga de {ind['carga_tributaria']:.1f}% sobre receita."})
         return ins
     
-    def generate(self, result):
-        empresa = {'razao_social': result.get('empresa', 'Empresa'), 'cnpj': result.get('cnpj', '')}
+    def generate(self, result, parecer_ia=None):
+        empresa = {'razao_social': result.get('empresa', 'Empresa'), 'cnpj': result.get('cnpj', ''),
+                    'setor': result.get('setor', ''), 'regime_tributario': result.get('regime_tributario', '')}
         dados_mensais = result.get('dados_mensais', [])
         ind = self._calcular_indicadores(dados_mensais) if dados_mensais else self._indicadores_vazios()
         if result.get('score') is not None: ind['score'] = result.get('score')
-        return self._gerar_pdf(empresa, ind, self._gerar_insights(ind))
+        return self._gerar_pdf(empresa, ind, self._gerar_insights(ind), parecer_ia=parecer_ia)
     
-    def gerar_relatorio(self, empresa, dados_mensais, analise=None, alertas=None, config=None):
+    def gerar_relatorio(self, empresa, dados_mensais, analise=None, alertas=None, config=None, parecer_ia=None):
         ind = self._calcular_indicadores(dados_mensais)
         if analise and analise.get('score') is not None: ind['score'] = analise.get('score')
-        return self._gerar_pdf(empresa, ind, self._gerar_insights(ind))
+        return self._gerar_pdf(empresa, ind, self._gerar_insights(ind), parecer_ia=parecer_ia)
     
-    def _gerar_pdf(self, empresa, ind, insights):
+    def calcular_indicadores_publico(self, dados_mensais):
+        """Expõe o cálculo de indicadores para uso externo (parecer IA)."""
+        return self._calcular_indicadores(dados_mensais)
+    
+    def _gerar_pdf(self, empresa, ind, insights, parecer_ia=None):
         buffer = io.BytesIO()
         doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=MARGEM_DIREITA, leftMargin=MARGEM_ESQUERDA,
                                topMargin=MARGEM_SUPERIOR, bottomMargin=MARGEM_INFERIOR)
@@ -509,6 +514,9 @@ class PDFGeneratorPro:
         story.append(PageBreak())
         story.extend(self._criar_evolucao(ind))
         story.append(PageBreak())
+        if parecer_ia:
+            story.append(PageBreak())
+            story.extend(self._criar_parecer_ia(parecer_ia))
         story.extend(self._criar_conclusoes(ind, insights))
         doc.build(story, onFirstPage=self._header_footer, onLaterPages=self._header_footer)
         buffer.seek(0)
@@ -872,5 +880,45 @@ class PDFGeneratorPro:
                        "Avaliar oportunidades de crescimento sustentável.", "Manter reserva de caixa para imprevistos."]
         return r
 
-def gerar_pdf(empresa, dados_mensais, analise=None, config=None, alertas=None):
-    return PDFGeneratorPro(config).gerar_relatorio(empresa, dados_mensais, analise, alertas, config)
+    
+    def _criar_parecer_ia(self, texto_parecer):
+        """Cria seção do parecer consultivo gerado por IA."""
+        el = [Paragraph('PARECER CONSULTIVO FINANCEIRO', self.styles['TituloSecao'])]
+        sep = Table([['']], colWidths=[self.content_width], rowHeights=[2])
+        sep.setStyle(TableStyle([('BACKGROUND', (0, 0), (0, 0), Cores.AZUL_ESCURO)]))
+        el.append(sep)
+        el.append(Spacer(1, 0.3*cm))
+        el.append(Paragraph(
+            '<i>Análise elaborada com base nos dados financeiros e indicadores calculados da empresa.</i>',
+            self.styles['TextoPequeno']
+        ))
+        el.append(Spacer(1, 0.4*cm))
+        
+        # Processar texto do parecer em parágrafos
+        for linha in texto_parecer.split('\n'):
+            linha = linha.strip()
+            if not linha:
+                el.append(Spacer(1, 0.2*cm))
+                continue
+            
+            # Detectar títulos de seção (texto em maiúsculas)
+            if linha.isupper() and len(linha) > 5 and len(linha) < 80:
+                el.append(Spacer(1, 0.3*cm))
+                el.append(Paragraph(f'<b>{linha}</b>', self.styles['SubtituloSecao']))
+                continue
+            
+            # Detectar títulos com número (ex: '1. DIAGNÓSTICO GERAL')
+            if len(linha) > 3 and linha[0].isdigit() and '.' in linha[:3] and any(c.isupper() for c in linha[3:10]):
+                el.append(Spacer(1, 0.3*cm))
+                el.append(Paragraph(f'<b>{linha}</b>', self.styles['SubtituloSecao']))
+                continue
+            
+            # Parágrafo normal
+            # Escapar caracteres especiais do ReportLab
+            linha_safe = linha.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+            el.append(Paragraph(linha_safe, self.styles['Corpo']))
+        
+        el.append(Spacer(1, 0.5*cm))
+        return el
+def gerar_pdf(empresa, dados_mensais, analise=None, config=None, alertas=None, parecer_ia=None):
+    return PDFGeneratorPro(config).gerar_relatorio(empresa, dados_mensais, analise, alertas, config, parecer_ia=parecer_ia)
