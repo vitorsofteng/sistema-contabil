@@ -3,28 +3,35 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Copia package.json e instala dependencias
 COPY package.json package-lock.json* ./
 RUN npm install
 
-# Copia codigo e faz build
 COPY . .
+
+# CRITICO: Garantir que VITE_API_URL nao seja embutido no build
+# Em producao, o nginx proxeia tudo - API_URL deve ser vazio
+ENV VITE_API_URL=""
 RUN npm run build
 
 # Stage 2: Production (nginx)
 FROM nginx:1.25-alpine
 
+# Remove config padrao do nginx
+RUN rm -f /etc/nginx/conf.d/default.conf
+
 # Copia build para nginx
 COPY --from=builder /app/dist /usr/share/nginx/html
 
-# Copia configuracao do nginx
+# Copia config do nginx (com placeholder __BACKEND_URL__)
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
-# Copia entrypoint
-COPY docker-entrypoint.sh /docker-entrypoint.sh
-RUN chmod +x /docker-entrypoint.sh
+# Copia entrypoint com nome unico (evita conflito com o entrypoint do nginx)
+COPY docker-entrypoint.sh /kontabil-entrypoint.sh
+
+# Garante LF (caso Git converta para CRLF no Windows) + permissao
+RUN sed -i 's/\r$//' /kontabil-entrypoint.sh && chmod +x /kontabil-entrypoint.sh
+RUN sed -i 's/\r$//' /etc/nginx/conf.d/default.conf
 
 EXPOSE 80
 
-# Entrypoint configura proxy, porta e runtime-config.js antes de iniciar nginx
-ENTRYPOINT ["/docker-entrypoint.sh"]
+ENTRYPOINT ["/kontabil-entrypoint.sh"]
