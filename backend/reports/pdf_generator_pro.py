@@ -908,6 +908,18 @@ class PDFGeneratorPro:
         ))
         el.append(Spacer(1, 0.4*cm))
         
+        import re
+        
+        def _md_to_rl(texto):
+            """Converte formatação markdown inline para tags ReportLab."""
+            # Escapar caracteres especiais primeiro
+            texto = texto.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+            # **bold** → <b>bold</b>
+            texto = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', texto)
+            # *italic* → <i>italic</i>
+            texto = re.sub(r'\*(.+?)\*', r'<i>\1</i>', texto)
+            return texto
+        
         # Processar texto do parecer em parágrafos
         for linha in texto_parecer.split('\n'):
             linha = linha.strip()
@@ -915,22 +927,48 @@ class PDFGeneratorPro:
                 el.append(Spacer(1, 0.2*cm))
                 continue
             
-            # Detectar títulos de seção (texto em maiúsculas)
+            # Detectar headers markdown: # Título, ## Subtítulo, ### Sub-subtítulo
+            md_match = re.match(r'^(#{1,3})\s+(.+)$', linha)
+            if md_match:
+                nivel = len(md_match.group(1))
+                titulo = md_match.group(2).strip()
+                # Remover markdown bold do título se houver
+                titulo = re.sub(r'\*\*(.+?)\*\*', r'\1', titulo)
+                titulo_safe = titulo.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                
+                if nivel == 1:
+                    el.append(Spacer(1, 0.4*cm))
+                    el.append(Paragraph(f'<b>{titulo_safe}</b>', self.styles['TituloSecao']))
+                elif nivel == 2:
+                    el.append(Spacer(1, 0.3*cm))
+                    el.append(Paragraph(f'<b>{titulo_safe}</b>', self.styles['SubtituloSecao']))
+                else:
+                    el.append(Spacer(1, 0.2*cm))
+                    el.append(Paragraph(f'<b>{titulo_safe}</b>', self.styles['Corpo']))
+                continue
+            
+            # Detectar títulos em MAIÚSCULAS
             if linha.isupper() and len(linha) > 5 and len(linha) < 80:
                 el.append(Spacer(1, 0.3*cm))
                 el.append(Paragraph(f'<b>{linha}</b>', self.styles['SubtituloSecao']))
                 continue
             
-            # Detectar títulos com número (ex: '1. DIAGNÓSTICO GERAL')
+            # Detectar títulos numerados (ex: '1. DIAGNÓSTICO GERAL')
             if len(linha) > 3 and linha[0].isdigit() and '.' in linha[:3] and any(c.isupper() for c in linha[3:10]):
                 el.append(Spacer(1, 0.3*cm))
-                el.append(Paragraph(f'<b>{linha}</b>', self.styles['SubtituloSecao']))
+                titulo_safe = _md_to_rl(linha)
+                el.append(Paragraph(titulo_safe, self.styles['SubtituloSecao']))
                 continue
             
-            # Parágrafo normal
-            # Escapar caracteres especiais do ReportLab
-            linha_safe = linha.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-            el.append(Paragraph(linha_safe, self.styles['Corpo']))
+            # Detectar listas markdown: - item ou * item
+            list_match = re.match(r'^[-*•]\s+(.+)$', linha)
+            if list_match:
+                item_text = _md_to_rl(list_match.group(1))
+                el.append(Paragraph(f'&nbsp;&nbsp;&nbsp;•&nbsp;&nbsp;{item_text}', self.styles['Corpo']))
+                continue
+            
+            # Parágrafo normal com formatação inline
+            el.append(Paragraph(_md_to_rl(linha), self.styles['Corpo']))
         
         el.append(Spacer(1, 0.5*cm))
         return el

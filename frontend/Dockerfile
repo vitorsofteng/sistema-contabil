@@ -3,24 +3,28 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Copia package.json e instala dependências
+# Copia package.json e instala dependencias
 COPY package.json package-lock.json* ./
 RUN npm install
 
-# Copia código e faz build
+# Copia codigo e faz build
 COPY . .
 RUN npm run build
 
-# Stage 2: Production
-# Usa versão específica do nginx para melhor cache
+# Stage 2: Production (nginx)
 FROM nginx:1.25-alpine
 
 # Copia build para nginx
 COPY --from=builder /app/dist /usr/share/nginx/html
 
-# Copia configuração do nginx
+# Copia configuracao do nginx
 COPY nginx.conf /etc/nginx/conf.d/default.conf
+
+# Copia entrypoint
+COPY docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
 
 EXPOSE 80
 
-CMD ["nginx", "-g", "daemon off;"]
+# Entrypoint configura proxy, porta e runtime-config.js antes de iniciar nginx
+ENTRYPOINT ["/docker-entrypoint.sh"]

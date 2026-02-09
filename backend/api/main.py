@@ -4061,6 +4061,309 @@ def _init_exportacoes_table():
     except Exception:
         pass
 
+
+def _init_importacoes_fila_table():
+    """Cria tabela de fila de importações se não existir."""
+    try:
+        with get_db() as db:
+            from sqlalchemy import text
+            db.execute(text("""
+                CREATE TABLE IF NOT EXISTS importacoes_fila (
+                    id SERIAL PRIMARY KEY,
+                    empresa_id INTEGER NOT NULL,
+                    contador_id INTEGER NOT NULL,
+                    nome_arquivo VARCHAR(255) NOT NULL,
+                    arquivo BYTEA NOT NULL,
+                    substituir_existentes BOOLEAN DEFAULT FALSE,
+                    status VARCHAR(20) NOT NULL DEFAULT 'pendente',
+                    posicao INTEGER NOT NULL DEFAULT 0,
+                    lote_id VARCHAR(50),
+                    resultado_json TEXT,
+                    erro TEXT,
+                    tentativas INTEGER DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    completed_at TIMESTAMP
+                )
+            """))
+            db.commit()
+    except Exception:
+        pass
+
+
+import time as _time
+import uuid as _uuid
+
+
+def _processar_fila_importacao(lote_id: str, empresa_id: int, contador_id: int):
+    """Processa todos os itens de um lote de importação SEQUENCIALMENTE com retry."""
+    import time
+    
+    MAX_RETRIES = 3
+    RETRY_DELAYS = [8, 20, 40]  # Backoff exponencial mais conservador
+    DELAY_ENTRE_ARQUIVOS = 5  # Segundos entre cada arquivo
+    
+    try:
+        # Buscar itens do lote ordenados por posição
+        with get_db() as db:
+            from sqlalchemy import text
+            itens = db.execute(text("""
+                SELECT id, nome_arquivo FROM importacoes_fila
+                WHERE lote_id = :lote_id AND status = 'pendente'
+                ORDER BY posicao ASC
+            """), {"lote_id": lote_id}).fetchall()
+        
+        total = len(itens)
+        logger.info(f"Fila de importação: {total} arquivos no lote {lote_id}")
+        
+        for idx, item in enumerate(itens):
+            item_id = item.id
+            nome = item.nome_arquivo
+            
+            logger.info(f"Processando arquivo {idx+1}/{total}: {nome}")
+            
+            # Marcar como processando
+            with get_db() as db:
+                from sqlalchemy import text
+                db.execute(text("""
+                    UPDATE importacoes_fila SET status = 'processando' WHERE id = :id
+                """), {"id": item_id})
+                db.commit()
+            
+            # Buscar conteúdo do arquivo
+            with get_db() as db:
+                from sqlalchemy import text
+                row = db.execute(text("""
+                    SELECT arquivo, substituir_existentes FROM importacoes_fila WHERE id = :id
+                """), {"id": item_id}).fetchone()
+            
+            if not row:
+                continue
+            
+            conteudo = row.arquivo
+            if isinstance(conteudo, memoryview):
+                conteudo = bytes(conteudo)
+            substituir = row.substituir_existentes
+            
+            # Tentar processar com retry
+            sucesso = False
+            ultimo_erro = None
+            
+            for tentativa in range(MAX_RETRIES):
+                try:
+                    resultado = _processar_arquivo_individual(
+                        conteudo, nome, empresa_id, substituir
+                    )
+                    
+                    if resultado.get('sucesso'):
+                        # Salvar dados
+                        dados_salvar = resultado['dados'].copy()
+                        if resultado.get('ano'):
+                            dados_salvar['ano'] = resultado['ano']
+                        if resultado.get('mes'):
+                            dados_salvar['mes'] = resultado['mes']
+                        
+                        salvar_dados_mensais(empresa_id, dados_salvar)
+                        _invalidar_cache_empresa(empresa_id)
+                        
+                        # Marcar como concluído
+                        with get_db() as db:
+                            from sqlalchemy import text
+                            db.execute(text("""
+                                UPDATE importacoes_fila 
+                                SET status = 'concluido', resultado_json = :res, 
+                                    tentativas = :tent, completed_at = CURRENT_TIMESTAMP,
+                                    arquivo = NULL
+                                WHERE id = :id
+                            """), {
+                                "id": item_id,
+                                "res": json.dumps(resultado, default=str),
+                                "tent": tentativa + 1
+                            })
+                            db.commit()
+                        
+                        sucesso = True
+                        break
+                    
+                    elif resultado.get('etapa') == 'conflito' and not substituir:
+                        # Conflito de período — marcar como conflito para o usuário decidir
+                        with get_db() as db:
+                            from sqlalchemy import text
+                            db.execute(text("""
+                                UPDATE importacoes_fila 
+                                SET status = 'conflito', resultado_json = :res,
+                                    tentativas = :tent
+                                WHERE id = :id
+                            """), {
+                                "id": item_id,
+                                "res": json.dumps(resultado, default=str),
+                                "tent": tentativa + 1
+                            })
+                            db.commit()
+                        sucesso = True  # Not an error, just needs user action
+                        break
+                    
+                    else:
+                        ultimo_erro = resultado.get('erro', 'Erro desconhecido')
+                        raise Exception(ultimo_erro)
+                
+                except Exception as e:
+                    ultimo_erro = str(e)
+                    
+                    # Verificar se é rate limit (429)
+                    is_rate_limit = any(term in str(e).lower() for term in [
+                        '429', 'rate', 'overloaded', 'limite de requisições', 
+                        'limite de requisi', 'too many', 'throttl'
+                    ])
+                    
+                    if tentativa < MAX_RETRIES - 1:
+                        delay = RETRY_DELAYS[tentativa] if is_rate_limit else 3
+                        logger.warning(f"Tentativa {tentativa+1} falhou para {nome}: {ultimo_erro}. Retry em {delay}s...")
+                        
+                        with get_db() as db:
+                            from sqlalchemy import text
+                            db.execute(text("""
+                                UPDATE importacoes_fila SET tentativas = :tent WHERE id = :id
+                            """), {"id": item_id, "tent": tentativa + 1})
+                            db.commit()
+                        
+                        time.sleep(delay)
+                    else:
+                        logger.error(f"Todas as tentativas falharam para {nome}: {ultimo_erro}")
+            
+            if not sucesso:
+                with get_db() as db:
+                    from sqlalchemy import text
+                    db.execute(text("""
+                        UPDATE importacoes_fila 
+                        SET status = 'erro', erro = :erro, tentativas = :tent, 
+                            completed_at = CURRENT_TIMESTAMP, arquivo = NULL
+                        WHERE id = :id
+                    """), {"id": item_id, "erro": ultimo_erro, "tent": MAX_RETRIES})
+                    db.commit()
+            
+            # Delay entre arquivos para evitar rate limit
+            if idx < total - 1:
+                time.sleep(DELAY_ENTRE_ARQUIVOS)
+        
+        # Após processar todos, executar análise uma vez
+        _executar_analise_auto(empresa_id, contador_id)
+        logger.info(f"Lote {lote_id} concluído")
+        
+    except Exception as e:
+        logger.error(f"Erro fatal na fila de importação {lote_id}: {e}")
+
+
+def _processar_arquivo_individual(conteudo: bytes, nome_arquivo: str, empresa_id: int, substituir: bool = False):
+    """Processa um único arquivo de importação. Retorna dict com resultado."""
+    
+    empresa = None
+    try:
+        with get_db() as db:
+            from sqlalchemy import text
+            r = db.execute(text("SELECT * FROM empresas WHERE id = :id"), {"id": empresa_id}).fetchone()
+            if r:
+                empresa = dict(r._mapping)
+    except Exception:
+        pass
+    
+    if not empresa:
+        return {"sucesso": False, "erro": "Empresa não encontrada"}
+    
+    sistema_contabil = empresa.get('sistema_contabil', 0)
+    
+    try:
+        # Tentar roteador inteligente
+        try:
+            from importers.roteador_importacao import importar_balancete_inteligente
+            resultado_roteado = importar_balancete_inteligente(
+                conteudo=conteudo,
+                nome_arquivo=nome_arquivo,
+                sistema_contabil=sistema_contabil,
+                forcar_ia=False,
+                fallback_ia=True
+            )
+            
+            if resultado_roteado.get('sucesso'):
+                dados = resultado_roteado.get('dados', {})
+                ano = resultado_roteado.get('ano')
+                mes = resultado_roteado.get('mes')
+                
+                # Verificar conflito
+                if ano and mes and not substituir:
+                    dados_existentes = listar_dados_mensais(empresa_id, limite=999)
+                    if any(d['ano'] == ano and d['mes'] == mes for d in dados_existentes):
+                        return {
+                            "sucesso": False,
+                            "etapa": "conflito",
+                            "dados": dados,
+                            "ano": ano,
+                            "mes": mes,
+                            "periodo": f"{mes:02d}/{ano}",
+                            "empresa_arquivo": resultado_roteado.get('empresa'),
+                            "metodo_usado": resultado_roteado.get('metodo', 'ia')
+                        }
+                
+                return {
+                    "sucesso": True,
+                    "dados": dados,
+                    "ano": ano,
+                    "mes": mes,
+                    "empresa_arquivo": resultado_roteado.get('empresa'),
+                    "cnpj_arquivo": resultado_roteado.get('cnpj'),
+                    "periodo": resultado_roteado.get('periodo'),
+                    "metodo_usado": resultado_roteado.get('metodo', 'ia'),
+                    "confianca": resultado_roteado.get('confianca', 0.85)
+                }
+            else:
+                raise Exception(resultado_roteado.get('erro', 'Roteador falhou'))
+                
+        except ImportError:
+            pass
+        
+        # Fallback para importação com IA direta
+        if IMPORTACAO_INTELIGENTE_AVAILABLE:
+            resultado = importar_inteligente(conteudo, nome_arquivo, empresa_id, False)
+        elif IMPORTACAO_IA_AVAILABLE:
+            resultado = importar_com_ia(conteudo, nome_arquivo, empresa_id)
+        else:
+            return {"sucesso": False, "erro": "Nenhum módulo de importação disponível"}
+        
+        if not resultado.sucesso:
+            return {"sucesso": False, "erro": resultado.erro}
+        
+        ano = resultado.ano
+        mes = resultado.mes
+        
+        # Verificar conflito
+        if ano and mes and not substituir:
+            dados_existentes = listar_dados_mensais(empresa_id, limite=999)
+            if any(d['ano'] == ano and d['mes'] == mes for d in dados_existentes):
+                return {
+                    "sucesso": False,
+                    "etapa": "conflito",
+                    "dados": resultado.dados,
+                    "ano": ano,
+                    "mes": mes,
+                    "periodo": f"{mes:02d}/{ano}",
+                    "empresa_arquivo": resultado.empresa,
+                    "metodo_usado": getattr(resultado, 'metodo_usado', 'ia')
+                }
+        
+        return {
+            "sucesso": True,
+            "dados": resultado.dados,
+            "ano": ano,
+            "mes": mes,
+            "empresa_arquivo": resultado.empresa,
+            "cnpj_arquivo": resultado.cnpj,
+            "periodo": resultado.periodo,
+            "metodo_usado": getattr(resultado, 'metodo_usado', 'ia'),
+            "confianca": getattr(resultado, 'confianca', 0.85)
+        }
+    
+    except Exception as e:
+        return {"sucesso": False, "erro": str(e)}
+
 def _processar_exportacao(exportacao_id: int):
     """Processa uma exportação em background."""
     import time
@@ -4396,6 +4699,152 @@ async def remover_exportacao(export_id: int, user: Dict = Depends(get_user)):
         return {"ok": True}
     except Exception:
         return {"ok": False}
+
+
+# =============================================
+# FILA DE IMPORTAÇÃO (SEQUENCIAL COM RETRY)
+# =============================================
+
+@app.post("/empresas/{empresa_id}/importar/lote")
+async def importar_lote_sequencial(
+    empresa_id: int,
+    background_tasks: BackgroundTasks,
+    files: List[UploadFile] = File(...),
+    substituir_existentes: bool = Form(False),
+    user: Dict = Depends(get_user)
+):
+    """
+    Agenda múltiplos arquivos para importação sequencial.
+    Cada arquivo é processado um por vez com delay e retry automático.
+    """
+    _init_importacoes_fila_table()
+    
+    empresa = obter_empresa(empresa_id, user['id'])
+    if not empresa:
+        raise HTTPException(status_code=404, detail="Empresa não encontrada")
+    
+    if len(files) > 24:
+        raise HTTPException(status_code=400, detail="Máximo de 24 arquivos por lote")
+    
+    import uuid
+    lote_id = str(uuid.uuid4())[:12]
+    itens_criados = []
+    
+    for idx, file in enumerate(files):
+        conteudo = await file.read()
+        
+        if len(conteudo) > MAX_UPLOAD_SIZE:
+            raise HTTPException(status_code=413, detail=f"Arquivo {file.filename} muito grande. Máximo: {MAX_UPLOAD_SIZE // (1024*1024)}MB")
+        
+        try:
+            with get_db() as db:
+                from sqlalchemy import text
+                result = db.execute(text("""
+                    INSERT INTO importacoes_fila 
+                    (empresa_id, contador_id, nome_arquivo, arquivo, substituir_existentes, status, posicao, lote_id)
+                    VALUES (:eid, :cid, :nome, :arq, :sub, 'pendente', :pos, :lote)
+                    RETURNING id
+                """), {
+                    "eid": empresa_id,
+                    "cid": user['id'],
+                    "nome": file.filename,
+                    "arq": conteudo,
+                    "sub": substituir_existentes,
+                    "pos": idx,
+                    "lote": lote_id
+                })
+                item_id = result.fetchone()[0]
+                db.commit()
+                
+                itens_criados.append({
+                    "id": item_id,
+                    "nome_arquivo": file.filename,
+                    "posicao": idx,
+                    "status": "pendente"
+                })
+        except Exception as e:
+            logger.error(f"Erro ao enfileirar {file.filename}: {e}")
+            raise HTTPException(status_code=500, detail=f"Erro ao enfileirar {file.filename}")
+    
+    # Processar em background (sequencialmente)
+    background_tasks.add_task(_processar_fila_importacao, lote_id, empresa_id, user['id'])
+    
+    return {
+        "ok": True,
+        "lote_id": lote_id,
+        "total_arquivos": len(itens_criados),
+        "itens": itens_criados
+    }
+
+
+@app.get("/importacoes/lote/{lote_id}")
+async def status_lote_importacao(lote_id: str, user: Dict = Depends(get_user)):
+    """Retorna o status de todos os itens de um lote de importação."""
+    _init_importacoes_fila_table()
+    
+    try:
+        with get_db() as db:
+            from sqlalchemy import text
+            rows = db.execute(text("""
+                SELECT id, nome_arquivo, status, posicao, resultado_json, erro, tentativas, 
+                       created_at, completed_at
+                FROM importacoes_fila
+                WHERE lote_id = :lote AND contador_id = :cid
+                ORDER BY posicao ASC
+            """), {"lote": lote_id, "cid": user['id']}).fetchall()
+        
+        if not rows:
+            raise HTTPException(status_code=404, detail="Lote não encontrado")
+        
+        itens = []
+        for row in rows:
+            item = {
+                "id": row.id,
+                "nome_arquivo": row.nome_arquivo,
+                "status": row.status,
+                "posicao": row.posicao,
+                "tentativas": row.tentativas,
+                "erro": row.erro,
+                "created_at": str(row.created_at) if row.created_at else None,
+                "completed_at": str(row.completed_at) if row.completed_at else None,
+            }
+            
+            # Incluir dados resumidos do resultado se concluído
+            if row.resultado_json and row.status == 'concluido':
+                try:
+                    res = json.loads(row.resultado_json)
+                    item["periodo"] = res.get("periodo")
+                    item["metodo_usado"] = res.get("metodo_usado")
+                    item["empresa_arquivo"] = res.get("empresa_arquivo")
+                except Exception:
+                    pass
+            
+            itens.append(item)
+        
+        total = len(itens)
+        concluidos = len([i for i in itens if i['status'] == 'concluido'])
+        erros = len([i for i in itens if i['status'] == 'erro'])
+        conflitos = len([i for i in itens if i['status'] == 'conflito'])
+        processando = len([i for i in itens if i['status'] == 'processando'])
+        pendentes = len([i for i in itens if i['status'] == 'pendente'])
+        
+        finalizado = (pendentes == 0 and processando == 0)
+        
+        return {
+            "lote_id": lote_id,
+            "total": total,
+            "concluidos": concluidos,
+            "erros": erros,
+            "conflitos": conflitos,
+            "processando": processando,
+            "pendentes": pendentes,
+            "finalizado": finalizado,
+            "itens": itens
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/empresas/{empresa_id}/relatorios/link")

@@ -409,41 +409,67 @@ def chamar_claude_api(texto: str, imagens: List[Dict] = None) -> Tuple[Dict, int
     }
     
     try:
+        import time as _time_mod
+        
+        MAX_RETRIES = 3
+        RETRY_DELAYS = [8, 20, 40]
+        
         with httpx.Client(timeout=60.0) as client:
-            response = client.post(ANTHROPIC_API_URL, headers=headers, json=payload)
-            response.raise_for_status()
+            for attempt in range(MAX_RETRIES):
+                try:
+                    response = client.post(ANTHROPIC_API_URL, headers=headers, json=payload)
+                    response.raise_for_status()
+                    
+                    result = response.json()
+                    
+                    # Extrai tokens usados
+                    tokens = result.get("usage", {})
+                    total_tokens = tokens.get("input_tokens", 0) + tokens.get("output_tokens", 0)
+                    
+                    # Extrai o texto da resposta
+                    resposta_texto = ""
+                    for block in result.get("content", []):
+                        if block.get("type") == "text":
+                            resposta_texto += block.get("text", "")
+                    
+                    # Parse do JSON - remove markdown code blocks
+                    resposta_texto = resposta_texto.strip()
+                    if resposta_texto.startswith("```"):
+                        resposta_texto = re.sub(r'^```json?\s*', '', resposta_texto)
+                        resposta_texto = re.sub(r'\s*```$', '', resposta_texto)
+                    
+                    dados = json.loads(resposta_texto)
+                    return dados, total_tokens
+                    
+                except httpx.HTTPStatusError as e:
+                    if e.response.status_code == 401:
+                        raise ValueError("API key inválida")
+                    elif e.response.status_code in (429, 529, 503):
+                        if attempt < MAX_RETRIES - 1:
+                            delay = RETRY_DELAYS[attempt]
+                            logger.warning(f"Rate limit (HTTP {e.response.status_code}), retry {attempt+1}/{MAX_RETRIES} em {delay}s...")
+                            _time_mod.sleep(delay)
+                            continue
+                        else:
+                            raise ValueError("Limite de requisições excedido após múltiplas tentativas.")
+                    else:
+                        raise ValueError(f"Erro na API: {e.response.status_code}")
+                
+                except httpx.ReadTimeout:
+                    if attempt < MAX_RETRIES - 1:
+                        delay = RETRY_DELAYS[attempt]
+                        logger.warning(f"Timeout na API, retry {attempt+1}/{MAX_RETRIES} em {delay}s...")
+                        _time_mod.sleep(delay)
+                        continue
+                    else:
+                        raise ValueError("Timeout na comunicação com a IA.")
             
-            result = response.json()
-            
-            # Extrai tokens usados
-            tokens = result.get("usage", {})
-            total_tokens = tokens.get("input_tokens", 0) + tokens.get("output_tokens", 0)
-            
-            # Extrai o texto da resposta
-            resposta_texto = ""
-            for block in result.get("content", []):
-                if block.get("type") == "text":
-                    resposta_texto += block.get("text", "")
-            
-            # Parse do JSON
-            # Remove possíveis markdown code blocks
-            resposta_texto = resposta_texto.strip()
-            if resposta_texto.startswith("```"):
-                resposta_texto = re.sub(r'^```json?\s*', '', resposta_texto)
-                resposta_texto = re.sub(r'\s*```$', '', resposta_texto)
-            
-            dados = json.loads(resposta_texto)
-            return dados, total_tokens
-            
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code == 401:
-            raise ValueError("API key inválida")
-        elif e.response.status_code == 429:
-            raise ValueError("Limite de requisições excedido. Tente novamente em alguns segundos.")
-        else:
-            raise ValueError(f"Erro na API: {e.response.status_code}")
+            raise ValueError("Limite de requisições excedido após múltiplas tentativas.")
+    
     except json.JSONDecodeError:
         raise ValueError("Erro ao processar resposta da IA")
+    except ValueError:
+        raise
     except Exception as e:
         raise ValueError(f"Erro na comunicação com a IA: {str(e)}")
 

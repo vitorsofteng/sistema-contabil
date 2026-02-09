@@ -208,10 +208,11 @@ Ações concretas e priorizadas. O que fazer primeiro? O que monitorar? Quais s�
 REGRAS:
 - Escreva em português brasileiro formal mas acessível
 - Use parágrafos corridos, NÃO use listas, bullets ou marcadores
+- NÃO use formatação markdown (nada de #, ##, **, *, -, ```)
 - Cite números específicos do relatório para embasar cada afirmação
 - Seja direto e prático — evite jargão desnecessário
 - O tom deve ser de um consultor experiente conversando com o empresário
 - Se algum indicador estiver zerado ou ausente, não invente — mencione que o dado não está disponível
-- Cada seção deve ter um TÍTULO em maiúsculas seguido dos parágrafos
+- Cada seção deve ter um TÍTULO em maiúsculas seguido dos parágrafos (ex: "1. DIAGNÓSTICO GERAL")
 - O parecer total deve ter entre 800 e 1200 palavras
 """
