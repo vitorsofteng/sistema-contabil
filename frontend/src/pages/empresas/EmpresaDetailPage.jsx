@@ -175,6 +175,8 @@ function EmpresaDetailPage({ empresaId, onNavigate }) {
                         <p className="text-xs text-slate-400">Indicadores e demonstrativos</p>
                       </div>
                     </button>
+                    {registros.length >= 6 && (
+                    <>
                     <div className="border-t border-slate-100 mx-2" />
                     <button
                       onClick={() => exportarPDF(true)}
@@ -186,6 +188,8 @@ function EmpresaDetailPage({ empresaId, onNavigate }) {
                         <p className="text-xs text-slate-400">Análise detalhada com recomendações</p>
                       </div>
                     </button>
+                    </>
+                    )}
                   </div>
                 </>
               )}

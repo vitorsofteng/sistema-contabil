@@ -1918,8 +1918,8 @@ async def add_dados_bulk(id: int, dados: DadosBulk, user: Dict = Depends(get_use
         
         for dados_dict in dados_normalizados:
             salvar_dados_mensais(id, dados_dict)
-            _invalidar_cache_empresa(id)
-            _executar_analise_auto(id, user['id'])
+        _invalidar_cache_empresa(id)
+        _executar_analise_auto(id, user['id'])
         
         return {
             "ok": True, 
@@ -1934,8 +1934,8 @@ async def add_dados_bulk(id: int, dados: DadosBulk, user: Dict = Depends(get_use
             dados_dict['ano'] = d.ano
             dados_dict['mes'] = d.mes
             salvar_dados_mensais(id, dados_dict)
-            _invalidar_cache_empresa(id)
-            _executar_analise_auto(id, user['id'])
+        _invalidar_cache_empresa(id)
+        _executar_analise_auto(id, user['id'])
         return {"ok": True, "salvos": len(dados.dados)}
 
 @app.delete("/empresas/{id}/dados/{ano}/{mes}")
@@ -2442,6 +2442,8 @@ async def get_pdf(id: int, aid: int, user: Dict = Depends(get_user), parecer_ia:
         raise HTTPException(status_code=404, detail="Análise não encontrada")
     
     dados_mensais = listar_dados_mensais(id)
+    if parecer_ia and len(dados_mensais) < 6:
+        parecer_ia = False
     tipo_cache = 'pdf_parecer' if parecer_ia else 'pdf'
     
     # Verificar cache
@@ -2489,6 +2491,8 @@ async def get_ultimo_pdf(id: int, user: Dict = Depends(get_user), parecer_ia: bo
     if not dados_mensais:
         raise HTTPException(status_code=404, detail="Nenhum dado financeiro cadastrado. Importe balancetes para gerar o relatório.")
     
+    if parecer_ia and len(dados_mensais) < 6:
+        parecer_ia = False
     tipo_cache = 'pdf_parecer' if parecer_ia else 'pdf'
     nome_arquivo = emp.get('razao_social', 'empresa')[:20].replace(' ', '_')
     
@@ -3721,6 +3725,10 @@ async def gerar_relatorio_pdf(
     if not dados_mensais:
         raise HTTPException(status_code=400, detail="Empresa não possui dados mensais para gerar relatório")
     
+    # Parecer só disponível com 6+ meses de dados
+    if parecer_ia and len(dados_mensais) < 6:
+        parecer_ia = False
+    
     tipo_cache = 'pdf_parecer' if parecer_ia else 'pdf'
     
     # Verificar cache — só regenera se houver novos dados
@@ -3857,6 +3865,17 @@ async def gerar_relatorio_excel(
     if not empresa:
         raise HTTPException(status_code=404, detail="Empresa não encontrada")
     
+    # ── Cache: retorna arquivo existente se dados não mudaram ──
+    cached = _verificar_cache_relatorio(empresa_id, user['id'], 'excel')
+    if cached:
+        filename = f"diagnostico_{empresa.get('razao_social', 'empresa').replace(' ', '_')[:30]}.xlsx"
+        return Response(
+            content=cached,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+        )
+    
+    # ── Cache miss: gerar do zero ──
     dados_mensais = listar_dados_mensais(empresa_id, limite=24)
     ultima_analise = obter_ultima_analise(empresa_id)
     
@@ -3888,12 +3907,18 @@ async def gerar_relatorio_excel(
             if result:
                 config = dict(result._mapping)
     except Exception:
-        pass  # Tabela pode não existir
+        pass
     
     try:
         excel_bytes = gerar_excel(empresa, dados_mensais, ultima_analise, config, alertas)
     except Exception as e:
-        raise HTTPException(status_code=500, detail="Erro ao gerar relatório")
+        logger.error(f"Erro ao gerar Excel: {type(e).__name__}: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Erro ao gerar relatório Excel: {type(e).__name__}: {str(e)[:200]}")
+    
+    # ── Salvar no cache ──
+    _salvar_cache_relatorio(empresa_id, user['id'], 'excel', excel_bytes)
     
     # Registrar histórico
     try:
@@ -3953,6 +3978,17 @@ async def gerar_relatorio_pptx(
     if not empresa:
         raise HTTPException(status_code=404, detail="Empresa não encontrada")
     
+    # ── Cache: retorna arquivo existente se dados não mudaram ──
+    cached = _verificar_cache_relatorio(empresa_id, user['id'], 'pptx')
+    if cached:
+        filename = f"apresentacao_{empresa.get('razao_social', 'empresa').replace(' ', '_')[:30]}.pptx"
+        return Response(
+            content=cached,
+            media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+        )
+    
+    # ── Cache miss: gerar do zero ──
     dados_mensais = listar_dados_mensais(empresa_id, limite=24)
     ultima_analise = obter_ultima_analise(empresa_id)
     
@@ -3984,12 +4020,18 @@ async def gerar_relatorio_pptx(
             if result:
                 config = dict(result._mapping)
     except Exception:
-        pass  # Tabela pode não existir
+        pass
     
     try:
         pptx_bytes = gerar_pptx(empresa, dados_mensais, ultima_analise, config, alertas)
     except Exception as e:
-        raise HTTPException(status_code=500, detail="Erro ao gerar relatório")
+        logger.error(f"Erro ao gerar PPTX: {type(e).__name__}: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Erro ao gerar apresentação PPTX: {type(e).__name__}: {str(e)[:200]}")
+    
+    # ── Salvar no cache ──
+    _salvar_cache_relatorio(empresa_id, user['id'], 'pptx', pptx_bytes)
     
     # Registrar histórico
     try:
@@ -4417,17 +4459,16 @@ def _processar_exportacao(exportacao_id: int):
         
         ultima_analise = obter_ultima_analise(empresa_id)
         
-        # Verificar cache primeiro (só para PDF)
-        if tipo in ('pdf', 'pdf_parecer'):
-            cached = _verificar_cache_relatorio(empresa_id, contador_id, tipo)
-            if cached:
-                with get_db() as db:
-                    from sqlalchemy import text
-                    db.execute(text("""
-                        UPDATE exportacoes SET status = 'concluido', arquivo = :arquivo, completed_at = CURRENT_TIMESTAMP WHERE id = :id
-                    """), {"id": exportacao_id, "arquivo": cached})
-                    db.commit()
-                return
+        # Verificar cache primeiro (PDF, Excel, PPTX)
+        cached = _verificar_cache_relatorio(empresa_id, contador_id, tipo)
+        if cached:
+            with get_db() as db:
+                from sqlalchemy import text
+                db.execute(text("""
+                    UPDATE exportacoes SET status = 'concluido', arquivo = :arquivo, completed_at = CURRENT_TIMESTAMP WHERE id = :id
+                """), {"id": exportacao_id, "arquivo": cached})
+                db.commit()
+            return
         
         # Buscar alertas
         alertas = []
@@ -4494,24 +4535,30 @@ def _processar_exportacao(exportacao_id: int):
                     config=config,
                     alertas=alertas
                 )
-            except ImportError:
-                # Fallback simples com openpyxl
-                import openpyxl
-                from io import BytesIO
-                wb = openpyxl.Workbook()
-                ws = wb.active
-                ws.title = "Dados Financeiros"
-                headers = ['Mês/Ano', 'Receita', 'Custos', 'Despesas', 'Impostos', 'Folha', 'Caixa']
-                ws.append(headers)
-                for d in dados_mensais:
-                    ws.append([
-                        f"{d.get('mes', '')}/{d.get('ano', '')}",
-                        d.get('receita', 0), d.get('custos', 0), d.get('despesas', 0),
-                        d.get('impostos', 0), d.get('folha', 0), d.get('caixa', 0)
-                    ])
-                buf = BytesIO()
-                wb.save(buf)
-                arquivo_bytes = buf.getvalue()
+            except Exception as e:
+                logger.error(f"Erro ao gerar Excel: {type(e).__name__}: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
+                # Fallback simples
+                try:
+                    import openpyxl
+                    from io import BytesIO
+                    wb = openpyxl.Workbook()
+                    ws = wb.active
+                    ws.title = "Dados Financeiros"
+                    headers = ['Mês/Ano', 'Receita', 'Custos', 'Despesas', 'Impostos', 'Folha', 'Caixa']
+                    ws.append(headers)
+                    for d in dados_mensais:
+                        ws.append([
+                            f"{d.get('mes', '')}/{d.get('ano', '')}",
+                            d.get('receita', 0), d.get('custos', 0), d.get('despesas', 0),
+                            d.get('impostos', 0), d.get('folha', 0), d.get('caixa', 0)
+                        ])
+                    buf = BytesIO()
+                    wb.save(buf)
+                    arquivo_bytes = buf.getvalue()
+                except:
+                    raise e
         
         # ── PPTX ──
         elif tipo == 'pptx':
@@ -4524,11 +4571,17 @@ def _processar_exportacao(exportacao_id: int):
                     config=config,
                     alertas=alertas
                 )
-            except ImportError:
-                raise Exception("Gerador PPTX não disponível")
+            except Exception as e:
+                logger.error(f"Erro ao gerar PPTX: {type(e).__name__}: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
+                raise
         
         if not arquivo_bytes:
             raise Exception(f"Tipo de exportação não suportado: {tipo}")
+        
+        # Salvar no cache para próximas requisições
+        _salvar_cache_relatorio(empresa_id, contador_id, tipo, arquivo_bytes)
         
         # Marcar como concluído
         with get_db() as db:
@@ -4541,13 +4594,16 @@ def _processar_exportacao(exportacao_id: int):
         logger.info(f"Exportação {exportacao_id} concluída ({tipo})")
         
     except Exception as e:
-        logger.error(f"Erro na exportação {exportacao_id}: {e}")
+        logger.error(f"Erro na exportação {exportacao_id}: {type(e).__name__}: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         try:
             with get_db() as db:
                 from sqlalchemy import text
+                erro_msg = f"{type(e).__name__}: {str(e)[:300]}"
                 db.execute(text("""
                     UPDATE exportacoes SET status = 'erro', erro = :erro, completed_at = CURRENT_TIMESTAMP WHERE id = :id
-                """), {"id": exportacao_id, "erro": "Erro ao gerar relatório"})
+                """), {"id": exportacao_id, "erro": erro_msg})
                 db.commit()
         except Exception:
             pass

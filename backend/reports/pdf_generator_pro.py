@@ -486,12 +486,15 @@ class PDFGeneratorPro:
     
     def gerar_relatorio(self, empresa, dados_mensais, analise=None, alertas=None, config=None, parecer_ia=None, indicadores=None):
         ind = indicadores if indicadores else self._calcular_indicadores(dados_mensais)
-        if analise and analise.get('score') is not None: ind['score'] = analise.get('score')
+        tem_analise = bool(analise and analise.get('score') is not None)
+        if tem_analise: ind['score'] = analise.get('score')
+        ind['tem_analise_real'] = tem_analise
         return self._gerar_pdf(empresa, ind, self._gerar_insights(ind), parecer_ia=parecer_ia)
     
     def calcular_indicadores_com_analise(self, dados_mensais, analise=None):
         """Calcula indicadores e sobrescreve score/status da análise oficial."""
         ind = self._calcular_indicadores(dados_mensais)
+        ind['tem_analise_real'] = bool(analise and analise.get('score') is not None)
         if analise:
             resultado = analise.get('resultado_completo') or analise.get('resultado') or {}
             if analise.get('score') is not None:
@@ -526,8 +529,10 @@ class PDFGeneratorPro:
         story.extend(self._criar_rentabilidade(ind))
         story.extend(self._criar_analise_fiscal(ind))
         story.append(PageBreak())
-        story.extend(self._criar_evolucao(ind))
-        story.append(PageBreak())
+        evol = self._criar_evolucao(ind)
+        if evol:
+            story.extend(evol)
+            story.append(PageBreak())
         if parecer_ia:
             story.append(PageBreak())
             story.extend(self._criar_parecer_ia(parecer_ia))
@@ -564,10 +569,17 @@ class PDFGeneratorPro:
         el.append(Paragraph(f"Período: {ind.get('periodo_inicio', '')} a {ind.get('periodo_fim', '')}", self.styles['SubtituloCapa']))
         el.append(Paragraph(f"({ind.get('meses_analisados', 0)} meses analisados)", self.styles['TextoPequeno']))
         el.append(Spacer(1, 1.2*cm))
-        gauge = GaugeChart(ind.get('score', 0))
-        gt = Table([[gauge]], colWidths=[self.content_width])
-        gt.setStyle(TableStyle([('ALIGN', (0, 0), (0, 0), 'CENTER')]))
-        el.append(gt)
+        if ind.get('tem_analise_real', False):
+            gauge = GaugeChart(ind.get('score', 0))
+            gt = Table([[gauge]], colWidths=[self.content_width])
+            gt.setStyle(TableStyle([('ALIGN', (0, 0), (0, 0), 'CENTER')]))
+            el.append(gt)
+        else:
+            el.append(Spacer(1, 0.5*cm))
+            nota = Paragraph("Análise completa disponível a partir de 6 meses de dados importados.",
+                ParagraphStyle('NotaCapa', parent=self.styles['SubtituloCapa'], fontSize=11, textColor=Cores.CINZA_500, fontName='Helvetica-Oblique'))
+            el.append(nota)
+            el.append(Spacer(1, 0.5*cm))
         el.append(Spacer(1, 0.8*cm))
         kpi = [
             [self._p('RECEITA TOTAL', 'CelulaHeader'), self._p('LUCRO LÍQUIDO', 'CelulaHeader'),
@@ -599,16 +611,21 @@ class PDFGeneratorPro:
         sep.setStyle(TableStyle([('BACKGROUND', (0, 0), (0, 0), Cores.AZUL_ESCURO)]))
         el.append(sep)
         el.append(Spacer(1, 0.5*cm))
-        score = ind.get('score', 0)
-        if score >= 70: status, cor, txt = "BOA SAÚDE FINANCEIRA", Cores.VERDE, "A empresa apresenta indicadores financeiros sólidos."
-        elif score >= 40: status, cor, txt = "ATENÇÃO NECESSÁRIA", Cores.AMARELO, "A empresa apresenta alguns pontos de atenção."
-        else: status, cor, txt = "SITUAÇÃO CRÍTICA", Cores.VERMELHO, "A empresa necessita de ações urgentes."
-        st = [[Paragraph(f"<b>{status}</b> (Score: {score}/100)", ParagraphStyle('S', fontSize=13, textColor=cor, fontName='Helvetica-Bold', alignment=TA_CENTER))]]
-        stb = Table(st, colWidths=[self.content_width], rowHeights=[40])
-        stb.setStyle(TableStyle([('BACKGROUND', (0, 0), (0, 0), Cores.CINZA_50), ('BOX', (0, 0), (0, 0), 2, cor), ('VALIGN', (0, 0), (0, 0), 'MIDDLE')]))
-        el.append(stb)
-        el.append(Spacer(1, 0.4*cm))
-        el.append(Paragraph(txt, self.styles['Corpo']))
+        if ind.get('tem_analise_real', False):
+            score = ind.get('score', 0)
+            if score >= 70: status, cor, txt = "BOA SAÚDE FINANCEIRA", Cores.VERDE, "A empresa apresenta indicadores financeiros sólidos."
+            elif score >= 40: status, cor, txt = "ATENÇÃO NECESSÁRIA", Cores.AMARELO, "A empresa apresenta alguns pontos de atenção."
+            else: status, cor, txt = "SITUAÇÃO CRÍTICA", Cores.VERMELHO, "A empresa necessita de ações urgentes."
+            st = [[Paragraph(f"<b>{status}</b> (Score: {score}/100)", ParagraphStyle('S', fontSize=13, textColor=cor, fontName='Helvetica-Bold', alignment=TA_CENTER))]]
+            stb = Table(st, colWidths=[self.content_width], rowHeights=[40])
+            stb.setStyle(TableStyle([('BACKGROUND', (0, 0), (0, 0), Cores.CINZA_50), ('BOX', (0, 0), (0, 0), 2, cor), ('VALIGN', (0, 0), (0, 0), 'MIDDLE')]))
+            el.append(stb)
+            el.append(Spacer(1, 0.4*cm))
+            el.append(Paragraph(txt, self.styles['Corpo']))
+        else:
+            nota = Paragraph("Análise completa disponível a partir de 6 meses de dados importados.", 
+                ParagraphStyle('NotaResumo', parent=self.styles['Corpo'], fontSize=10, textColor=Cores.CINZA_500, fontName='Helvetica-Oblique'))
+            el.append(nota)
         el.append(Spacer(1, 0.5*cm))
         el.append(Paragraph("1.1 Principais Números do Período", self.styles['SubtituloSecao']))
         num = [
@@ -817,6 +834,9 @@ class PDFGeneratorPro:
         return el
     
     def _criar_evolucao(self, ind):
+        evol_data = ind.get('dados_evolucao', [])
+        if len(evol_data) < 2:
+            return []  # Skip section entirely with < 2 months
         el = [Paragraph("8. EVOLUÇÃO MENSAL", self.styles['TituloSecao'])]
         sep = Table([['']], colWidths=[self.content_width], rowHeights=[2])
         sep.setStyle(TableStyle([('BACKGROUND', (0, 0), (0, 0), Cores.AZUL_ESCURO)]))
@@ -855,10 +875,13 @@ class PDFGeneratorPro:
         sep.setStyle(TableStyle([('BACKGROUND', (0, 0), (0, 0), Cores.AZUL_ESCURO)]))
         el.append(sep)
         el.append(Spacer(1, 0.4*cm))
-        s = ind.get('score', 0)
-        if s >= 70: diag = "A empresa apresenta <b>boa saúde financeira</b>, com indicadores equilibrados."
-        elif s >= 40: diag = "A empresa requer <b>atenção em alguns pontos</b> identificados nesta análise."
-        else: diag = "A empresa está em <b>situação crítica</b> e necessita de ações urgentes."
+        if ind.get('tem_analise_real', False):
+            s = ind.get('score', 0)
+            if s >= 70: diag = "A empresa apresenta <b>boa saúde financeira</b>, com indicadores equilibrados."
+            elif s >= 40: diag = "A empresa requer <b>atenção em alguns pontos</b> identificados nesta análise."
+            else: diag = "A empresa está em <b>situação crítica</b> e necessita de ações urgentes."
+        else:
+            diag = "Relatório parcial com base nos dados disponíveis. A análise completa com score de saúde será gerada a partir de 6 meses de dados importados."
         el.append(Paragraph("9.1 Diagnóstico Geral", self.styles['SubtituloSecao']))
         el.append(Paragraph(diag, self.styles['Corpo']))
         el.append(Spacer(1, 0.4*cm))
