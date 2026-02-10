@@ -2442,6 +2442,8 @@ async def get_pdf(id: int, aid: int, user: Dict = Depends(get_user), parecer_ia:
         raise HTTPException(status_code=404, detail="Análise não encontrada")
     
     dados_mensais = listar_dados_mensais(id)
+    if parecer_ia and len(dados_mensais) < 6:
+        parecer_ia = False
     tipo_cache = 'pdf_parecer' if parecer_ia else 'pdf'
     
     # Verificar cache
@@ -2489,6 +2491,8 @@ async def get_ultimo_pdf(id: int, user: Dict = Depends(get_user), parecer_ia: bo
     if not dados_mensais:
         raise HTTPException(status_code=404, detail="Nenhum dado financeiro cadastrado. Importe balancetes para gerar o relatório.")
     
+    if parecer_ia and len(dados_mensais) < 6:
+        parecer_ia = False
     tipo_cache = 'pdf_parecer' if parecer_ia else 'pdf'
     nome_arquivo = emp.get('razao_social', 'empresa')[:20].replace(' ', '_')
     
@@ -3720,6 +3724,10 @@ async def gerar_relatorio_pdf(
     dados_mensais = listar_dados_mensais(empresa_id, limite=24)
     if not dados_mensais:
         raise HTTPException(status_code=400, detail="Empresa não possui dados mensais para gerar relatório")
+    
+    # Parecer só disponível com 6+ meses de dados
+    if parecer_ia and len(dados_mensais) < 6:
+        parecer_ia = False
     
     tipo_cache = 'pdf_parecer' if parecer_ia else 'pdf'
     

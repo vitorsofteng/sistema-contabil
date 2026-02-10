@@ -156,9 +156,9 @@ class ExcelGenerator:
         rec_princ = res.get('recomendacao_principal', '')
         meses = res.get('meses_analisados', ind.get('meses_analisados', 0))
 
-        for fn, args in [
+        slides = [
             (self._aba_resumo, (empresa, ind, score, status, sd, tend, caixa, meses, alertas, rec_princ)),
-            (self._aba_score, (score, status, sd, tend, caixa, prob)),
+            (self._aba_score, (score, status, sd, tend, caixa, prob)) if score else None,
             (self._aba_dre, (empresa, dados_mensais, ind)),
             (self._aba_indicadores, (ind,)),
             (self._aba_balanco, (ind,)),
@@ -166,7 +166,8 @@ class ExcelGenerator:
             (self._aba_tendencia, (tend, prev)),
             (self._aba_riscos, (prob, caixa)),
             (self._aba_alertas, (alertas, rec_princ, tend, caixa)),
-        ]:
+        ]
+        for fn, args in [s for s in slides if s]:
             try: fn(*args)
             except Exception as e:
                 import logging; logging.getLogger(__name__).error(f"Erro {fn.__name__}: {e}")
@@ -193,16 +194,20 @@ class ExcelGenerator:
         ws[f'B{r}'] = f"Gerado em: {datetime.now().strftime('%d/%m/%Y %H:%M')} | {meses} meses analisados"; ws[f'B{r}'].font = self.smf; r += 2
 
         # Score + dimensões
-        ws[f'B{r}'] = "SCORE DE SAÚDE FINANCEIRA"; ws[f'B{r}'].font = self.bf; r += 1
-        ws[f'B{r}'] = score; ws[f'B{r}'].font = Font(name='Calibri', size=36, bold=True, color=self.cor)
-        lbl = 'Saudável' if status == 'saudavel' else 'Atenção' if status == 'atencao' else 'Crítico' if status == 'critico' else status
-        ws[f'C{r}'] = f"/100 — {lbl}"; ws[f'C{r}'].font = Font(name='Calibri', size=14, bold=True)
-        ws[f'C{r}'].fill = self._sfill(status)
-        if sd:
-            for j, (lbl2, key) in enumerate([('Tendência','tendencia'),('Margem','margem'),('Caixa','caixa'),('Estabilidade','estabilidade')]):
-                ws.cell(row=r, column=4+j, value=lbl2).font = self.smf
-                ws.cell(row=r+1, column=4+j, value=sd.get(key, '-')).font = self.bf
-        r += 3
+        if score:
+            ws[f'B{r}'] = "SCORE DE SAÚDE FINANCEIRA"; ws[f'B{r}'].font = self.bf; r += 1
+            ws[f'B{r}'] = score; ws[f'B{r}'].font = Font(name='Calibri', size=36, bold=True, color=self.cor)
+            lbl = 'Saudável' if status == 'saudavel' else 'Atenção' if status == 'atencao' else 'Crítico' if status == 'critico' else status
+            ws[f'C{r}'] = f"/100 — {lbl}"; ws[f'C{r}'].font = Font(name='Calibri', size=14, bold=True)
+            ws[f'C{r}'].fill = self._sfill(status)
+            if sd:
+                for j, (lbl2, key) in enumerate([('Tendência','tendencia'),('Margem','margem'),('Caixa','caixa'),('Estabilidade','estabilidade')]):
+                    ws.cell(row=r, column=4+j, value=lbl2).font = self.smf
+                    ws.cell(row=r+1, column=4+j, value=sd.get(key, '-')).font = self.bf
+            r += 3
+        else:
+            ws[f'B{r}'] = "Análise completa disponível a partir de 6 meses de dados importados."
+            ws[f'B{r}'].font = Font(name='Calibri', size=10, italic=True, color='6B7280'); r += 2
 
         # KPIs
         ws[f'B{r}'] = "RESUMO FINANCEIRO"; ws[f'B{r}'].font = self.bf; r += 1
@@ -426,10 +431,10 @@ class ExcelGenerator:
 
     # === ABA 6: EVOLUÇÃO ===
     def _aba_evolucao(self, dados):
+        if not dados or len(dados) < 2: return  # Skip - need 2+ months
         ws = self.wb.create_sheet("Evolução")
         ws.sheet_properties.tabColor = self.cor
         ws.column_dimensions['A'].width = 3
-        if not dados or len(dados) < 2: ws['B2'] = "Dados insuficientes"; return
         r = 2; ws[f'B{r}'] = "ANÁLISE DE EVOLUÇÃO"; ws[f'B{r}'].font = self.tf; r += 2
         ds = sorted(dados, key=lambda x: (x.get('ano',0), x.get('mes',0)))[-12:]
         for i, h in enumerate(['Mês','Receita','Custos','Desp.+Folha','Lucro Líq.','Margem','Caixa']):

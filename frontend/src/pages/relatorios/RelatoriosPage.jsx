@@ -184,8 +184,6 @@ function RelatoriosPage({ onNavigate }) {
         {[
           { id: 'gerar', label: 'Gerar Relatório' },
           { id: 'config', label: 'Configuração' },
-          { id: 'historico', label: 'Histórico' },
-          { id: 'links', label: 'Links' },
         ].map(tab => (
           <button
             key={tab.id}
@@ -209,7 +207,12 @@ function RelatoriosPage({ onNavigate }) {
             <h3 className="font-semibold text-slate-900 mb-4">Selecione a Empresa</h3>
             <select
               value={empresaSelecionada || ''}
-              onChange={(e) => setEmpresaSelecionada(e.target.value ? parseInt(e.target.value) : null)}
+              onChange={(e) => {
+                const id = e.target.value ? parseInt(e.target.value) : null;
+                setEmpresaSelecionada(id);
+                const emp = empresas.find(em => em.id === id);
+                if (!emp || emp.meses_dados < 6) setIncluirParecer(false);
+              }}
               className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500"
             >
               <option value="">Selecione...</option>
@@ -230,6 +233,9 @@ function RelatoriosPage({ onNavigate }) {
                   </div>
                   <h3 className="font-semibold text-lg mb-2">Relatório PDF</h3>
                   <p className="text-sm text-slate-500 mb-4">Relatório financeiro completo com análises</p>
+                  {(() => {
+                    const emp = empresas.find(e => e.id === empresaSelecionada);
+                    return emp && emp.meses_dados >= 6 ? (
                   <label className="flex items-center gap-2 text-sm text-slate-600 mb-3 cursor-pointer">
                     <input 
                       type="checkbox" 
@@ -239,6 +245,8 @@ function RelatoriosPage({ onNavigate }) {
                     />
                     <span>Incluir Parecer Consultivo</span>
                   </label>
+                    ) : null;
+                  })()}
                   <Button 
                     onClick={() => gerarRelatorio('pdf')}
                     className="w-full"
@@ -289,20 +297,7 @@ function RelatoriosPage({ onNavigate }) {
             </div>
           )}
 
-          {/* Link compartilhável */}
-          {empresaSelecionada && (
-            <Card className="p-6">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="font-semibold text-slate-900">Link Compartilhável</h3>
-                <Button size="sm" variant="secondary" onClick={() => setShowLinkModal(true)}>
-                  <Plus className="w-4 h-4" /> Criar Link
-                </Button>
-              </div>
-              <p className="text-sm text-slate-500">
-                Crie um link temporário para compartilhar o relatório com seu cliente, sem necessidade de login.
-              </p>
-            </Card>
-          )}
+          {/* Link compartilhável - implementação futura */}
         </div>
       )}
 

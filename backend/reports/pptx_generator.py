@@ -191,7 +191,7 @@ class PowerPointGenerator:
         if empresa.get('setor'): info.append(f"Setor: {empresa['setor']}")
         if meses: info.append(f"{meses} meses analisados")
         self._tb(sl, Inches(1), Inches(4.7), Inches(7), Inches(0.4), " • ".join(info), sz=12, color=self.C['gray'])
-        if score:
+        if score and status:
             scl = self._scor(status)
             self._oval(sl, Inches(9.5), Inches(2.2), Inches(2.5), Inches(2.5), fill=scl, txt=str(score), sz=48, color=self.C['white'])
             self._tb(sl, Inches(9.2), Inches(4.8), Inches(3), Inches(0.4), f"de 100 — {self._status_label(status)}", sz=14, color=self.C['white'], align=PP_ALIGN.CENTER)
@@ -217,26 +217,30 @@ class PowerPointGenerator:
             self._tb(sl, x+Inches(0.2), y+Inches(0.1), Inches(2.2), Inches(0.25), titulo, sz=9, color=self.C['gray'])
             self._tb(sl, x+Inches(0.2), y+Inches(0.4), Inches(2.2), Inches(0.5), valor, sz=18, bold=True, color=self.C['dark'])
             self._tb(sl, x+Inches(0.2), y+Inches(1.0), Inches(2.2), Inches(0.25), sub, sz=9, color=self.C['gray'])
-        # Right side: Score + components
+        # Right side: Score + components (or note if no analysis)
         sx = Inches(9.0)
-        scl = self._scor(status)
-        self._shape(sl, sx, Inches(1.3), Inches(3.8), Inches(5.3), fill=self.C['light'])
-        self._shape(sl, sx, Inches(1.3), Inches(3.8), Inches(0.06), fill=scl)
-        # Score number
-        self._oval(sl, sx+Inches(0.9), Inches(1.55), Inches(2), Inches(2), fill=scl, txt=str(score), sz=40, color=self.C['white'])
-        self._tb(sl, sx, Inches(3.6), Inches(3.8), Inches(0.3), f"de 100 — {self._status_label(status)}", sz=12, bold=True, color=scl, align=PP_ALIGN.CENTER)
-        if confianca:
-            self._tb(sl, sx, Inches(3.9), Inches(3.8), Inches(0.25), f"Confiança: {self._fp(confianca,0)}", sz=9, color=self.C['gray'], align=PP_ALIGN.CENTER)
-        # Score components as mini bars
-        if sd:
-            cy = Inches(4.35)
-            for label, key in [('Tendência','tendencia'),('Margem','margem'),('Caixa','caixa'),('Estabilidade','estabilidade'),('Anomalias','anomalias')]:
-                val = sd.get(key, 0)
-                self._tb(sl, sx+Inches(0.2), cy, Inches(1.5), Inches(0.25), label, sz=8, color=self.C['gray'])
-                self._tb(sl, sx+Inches(1.6), cy, Inches(0.6), Inches(0.25), f"{val:.1f}", sz=8, bold=True, color=self.C['dark'], align=PP_ALIGN.RIGHT)
-                max_val = max(30, max(sd.get(k,0) for _,k in [('','tendencia'),('','margem'),('','caixa'),('','estabilidade'),('','anomalias')]) * 1.2)
-                self._bar(sl, sx+Inches(2.3), cy+Inches(0.05), Inches(1.3), Inches(0.15), min(100,val/max_val*100) if max_val else 0, self.C['accent'])
-                cy += Inches(0.38)
+        if score and status:
+            scl = self._scor(status)
+            self._shape(sl, sx, Inches(1.3), Inches(3.8), Inches(5.3), fill=self.C['light'])
+            self._shape(sl, sx, Inches(1.3), Inches(3.8), Inches(0.06), fill=scl)
+            self._oval(sl, sx+Inches(0.9), Inches(1.55), Inches(2), Inches(2), fill=scl, txt=str(score), sz=40, color=self.C['white'])
+            self._tb(sl, sx, Inches(3.6), Inches(3.8), Inches(0.3), f"de 100 — {self._status_label(status)}", sz=12, bold=True, color=scl, align=PP_ALIGN.CENTER)
+            if confianca:
+                self._tb(sl, sx, Inches(3.9), Inches(3.8), Inches(0.25), f"Confiança: {self._fp(confianca,0)}", sz=9, color=self.C['gray'], align=PP_ALIGN.CENTER)
+            if sd:
+                cy = Inches(4.35)
+                for label, key in [('Tendência','tendencia'),('Margem','margem'),('Caixa','caixa'),('Estabilidade','estabilidade'),('Anomalias','anomalias')]:
+                    val = sd.get(key, 0)
+                    self._tb(sl, sx+Inches(0.2), cy, Inches(1.5), Inches(0.25), label, sz=8, color=self.C['gray'])
+                    self._tb(sl, sx+Inches(1.6), cy, Inches(0.6), Inches(0.25), f"{val:.1f}", sz=8, bold=True, color=self.C['dark'], align=PP_ALIGN.RIGHT)
+                    max_val = max(30, max(sd.get(k,0) for _,k in [('','tendencia'),('','margem'),('','caixa'),('','estabilidade'),('','anomalias')]) * 1.2)
+                    self._bar(sl, sx+Inches(2.3), cy+Inches(0.05), Inches(1.3), Inches(0.15), min(100,val/max_val*100) if max_val else 0, self.C['accent'])
+                    cy += Inches(0.38)
+        else:
+            self._shape(sl, sx, Inches(1.3), Inches(3.8), Inches(3.5), fill=self.C['light'])
+            self._shape(sl, sx, Inches(1.3), Inches(3.8), Inches(0.06), fill=self.C['accent'])
+            self._tb(sl, sx+Inches(0.3), Inches(2.0), Inches(3.2), Inches(0.4), "Score de Saúde", sz=14, bold=True, color=self.C['dark'])
+            self._tb(sl, sx+Inches(0.3), Inches(2.6), Inches(3.2), Inches(1.0), "Análise completa disponível a partir de 6 meses de dados importados.", sz=11, color=self.C['gray'])
 
     def _slide_tendencia(self, tend):
         if not tend: return  # Skip entire slide
@@ -348,6 +352,8 @@ class PowerPointGenerator:
             self._tb(sl,x+Inches(0.3),y+Inches(1.95),Inches(3.2),Inches(0.25),ref,sz=9,color=self.C['gray'])
 
     def _slide_evolucao(self, dados_raw, dados_chart):
+        has_chart = (dados_chart and len(dados_chart) >= 2) or (dados_raw and len(dados_raw) >= 2)
+        if not has_chart: return  # Skip - need 2+ months
         sl = self.prs.slides.add_slide(self.prs.slide_layouts[6])
         self._tb(sl, Inches(0.6), Inches(0.4), Inches(8), Inches(0.5), "EVOLUÇÃO FINANCEIRA", sz=28, bold=True, color=self.C['dark'])
         self._shape(sl, Inches(0.6), Inches(0.95), Inches(2), Inches(0.04), fill=self.C['accent'])
