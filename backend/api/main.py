@@ -1918,8 +1918,8 @@ async def add_dados_bulk(id: int, dados: DadosBulk, user: Dict = Depends(get_use
         
         for dados_dict in dados_normalizados:
             salvar_dados_mensais(id, dados_dict)
-            _invalidar_cache_empresa(id)
-            _executar_analise_auto(id, user['id'])
+        _invalidar_cache_empresa(id)
+        _executar_analise_auto(id, user['id'])
         
         return {
             "ok": True, 
@@ -1934,8 +1934,8 @@ async def add_dados_bulk(id: int, dados: DadosBulk, user: Dict = Depends(get_use
             dados_dict['ano'] = d.ano
             dados_dict['mes'] = d.mes
             salvar_dados_mensais(id, dados_dict)
-            _invalidar_cache_empresa(id)
-            _executar_analise_auto(id, user['id'])
+        _invalidar_cache_empresa(id)
+        _executar_analise_auto(id, user['id'])
         return {"ok": True, "salvos": len(dados.dados)}
 
 @app.delete("/empresas/{id}/dados/{ano}/{mes}")

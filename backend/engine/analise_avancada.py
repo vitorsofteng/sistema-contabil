@@ -352,7 +352,13 @@ class AnaliseAvancada:
 # =============================================================================
 
 def _detectar_acumulados(dados_ano: List[Dict]) -> bool:
-    """Detecta se os dados de um ano são valores acumulados no exercício."""
+    """Detecta se os dados de um ano são valores acumulados no exercício.
+    
+    Acumulados: mês N ≈ soma dos N primeiros meses (ex: 10k, 20k, 30k, 40k).
+    Crescimento real: empresa cresce mas valores não somam (ex: 38k, 46k, 54k).
+    
+    Critério: último valor / primeiro valor ≈ número de meses → acumulado.
+    """
     if len(dados_ano) < 2:
         return False
     
@@ -360,17 +366,41 @@ def _detectar_acumulados(dados_ano: List[Dict]) -> bool:
     if any(d.get('_valores_acumulados', False) for d in dados_ano):
         return True
     
-    # Heurística: se receitas crescem monotonicamente
+    # Heurística robusta: padrão acumulado = último ≈ n * primeiro
     dados_sorted = sorted(dados_ano, key=lambda x: x.get('mes', 0))
     receitas = [d.get('receita', 0) or d.get('receita_bruta', 0) or 0 for d in dados_sorted]
     receitas_positivas = [r for r in receitas if r > 0]
     
-    if len(receitas_positivas) >= 2:
-        crescente = all(receitas_positivas[i] <= receitas_positivas[i+1] for i in range(len(receitas_positivas)-1))
-        if crescente and receitas_positivas[0] > 0:
-            crescimento = (receitas_positivas[-1] - receitas_positivas[0]) / receitas_positivas[0]
-            if crescimento > 0.5:
-                return True
+    if len(receitas_positivas) < 3:
+        return False
+    
+    # Deve ser monotonicamente crescente
+    crescente = all(receitas_positivas[i] <= receitas_positivas[i+1] * 1.01 for i in range(len(receitas_positivas)-1))
+    if not crescente:
+        return False
+    
+    n = len(receitas_positivas)
+    primeiro = receitas_positivas[0]
+    ultimo = receitas_positivas[-1]
+    
+    if primeiro <= 0:
+        return False
+    
+    # Acumulado: último/primeiro ≈ n (ex: 6 meses → último ≈ 6x primeiro)
+    # Crescimento real: último/primeiro << n (ex: 2x em 6 meses)
+    ratio = ultimo / primeiro
+    # Se ratio está dentro de 40-160% do esperado para acumulado, é acumulado
+    esperado = n
+    if ratio >= esperado * 0.4 and ratio <= esperado * 1.6:
+        # Verificação adicional: diferenças entre meses devem ser similares (acumulado)
+        diffs = [receitas_positivas[i+1] - receitas_positivas[i] for i in range(len(receitas_positivas)-1)]
+        if diffs:
+            media_diff = sum(diffs) / len(diffs)
+            if media_diff > 0:
+                variacao = max(abs(d - media_diff) / media_diff for d in diffs if media_diff > 0)
+                # Acumulado tem incrementos relativamente constantes (variação < 80%)
+                if variacao < 0.8:
+                    return True
     
     return False
 
@@ -1025,21 +1055,24 @@ def gerar_projecoes(dados_mensais: List[Dict], meses: int = 12) -> List[Projecao
     folha_media = sum(recentes_fol) / n
     caixa_atual = ultimo.get('caixa', 0) or 0
     
-    print(f"[PROJEÇÕES] Médias mensais recentes ({n} meses) - Receita: R$ {receita_media:,.2f}, Custos: R$ {custos_media:,.2f}")
+    # Log: Médias mensais recentes calculadas
     
     # Calcula tendência histórica a partir dos valores mensais reais
-    if len(receitas_mensais) >= 6:
+    tendencia_mensal = 0
+    if len(receitas_mensais) >= 3:
+        # Usar taxa composta mensal (CAGR mensal)
         receita_inicio = sum(receitas_mensais[:3]) / 3
-        receita_fim = sum(receitas_mensais[-3:]) / 3
-        tendencia = ((receita_fim - receita_inicio) / receita_inicio) if receita_inicio > 0 else 0
-        tendencia_mensal = tendencia / (len(receitas_mensais) - 3) if len(receitas_mensais) > 3 else 0
-    else:
-        tendencia_mensal = 0
+        receita_fim = sum(receitas_mensais[-3:]) / 3 if len(receitas_mensais) >= 6 else receitas_mensais[-1]
+        n_periodos = max(len(receitas_mensais) - 1, 1)
+        if receita_inicio > 0 and receita_fim > 0:
+            tendencia_mensal = (receita_fim / receita_inicio) ** (1 / n_periodos) - 1
+            tendencia_mensal = max(-0.10, min(tendencia_mensal, 0.15))
     
-    # Cenários
+    # Cenários: garantir SEMPRE pessimista < realista < otimista
+    spread = max(0.02, abs(tendencia_mensal) * 0.3)
     cenarios = {
         'pessimista': {
-            'taxa_receita': max(tendencia_mensal - 0.02, -0.05),
+            'taxa_receita': max(tendencia_mensal - spread, -0.10),
             'taxa_custos': 0.01
         },
         'realista': {
@@ -1047,7 +1080,7 @@ def gerar_projecoes(dados_mensais: List[Dict], meses: int = 12) -> List[Projecao
             'taxa_custos': 0.005
         },
         'otimista': {
-            'taxa_receita': min(tendencia_mensal + 0.02, 0.08),
+            'taxa_receita': tendencia_mensal + spread,
             'taxa_custos': 0
         }
     }
