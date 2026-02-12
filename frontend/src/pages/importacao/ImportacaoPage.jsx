@@ -31,6 +31,11 @@ function ImportacaoPage({ onNavigate }) {
   const [dadosRevisao, setDadosRevisao] = useState(null);
   const [carregandoRevisao, setCarregandoRevisao] = useState(false);
   
+  // Detecção de lacunas de meses
+  const [mesesExistentes, setMesesExistentes] = useState([]);
+  const [lacunasDetectadas, setLacunasDetectadas] = useState([]);
+  const [showModalLacunas, setShowModalLacunas] = useState(false);
+  
   // Modal de CNPJ faltando
   const [showModalCnpj, setShowModalCnpj] = useState(false);
   const [cnpjManual, setCnpjManual] = useState('');
@@ -396,6 +401,23 @@ function ImportacaoPage({ onNavigate }) {
         if (resultado.encontrada && resultado.empresa) {
           console.log('[IMPORT] ✓ Empresa encontrada:', resultado.empresa.razao_social);
           setEmpresaExistente(resultado.empresa);
+          
+          // Buscar meses já importados para detectar lacunas
+          try {
+            const resDados = await api(`/empresas/${resultado.empresa.id}/dados`);
+            if (resDados.ok) {
+              const dadosExist = await resDados.json();
+              const meses = (dadosExist.dados || dadosExist || []).map(d => {
+                if (d.competencia) return d.competencia.substring(0, 7);
+                if (d.ano && d.mes) return `${d.ano}-${String(d.mes).padStart(2, '0')}`;
+                return null;
+              }).filter(Boolean);
+              setMesesExistentes(meses);
+              console.log('[IMPORT] Meses já importados:', meses);
+            }
+          } catch (err) {
+            console.log('[IMPORT] Erro ao buscar meses existentes:', err);
+          }
         } else {
           console.log('[IMPORT] ✗ Empresa não encontrada, será criada nova');
           setEmpresaExistente(null);
@@ -463,6 +485,40 @@ function ImportacaoPage({ onNavigate }) {
     }
 
     setLoading(false);
+    
+    // Detectar lacunas entre meses existentes e novos
+    const mesesNovos = resultados
+      .filter(r => r.sucesso && r.competencia)
+      .map(r => r.competencia.substring(0, 7));
+    
+    const detectarLacunas = (existentes, novos) => {
+      const todos = [...new Set([...existentes, ...novos])].sort();
+      if (todos.length < 2) return [];
+      
+      const lacunas = [];
+      const primeiro = todos[0];
+      const ultimo = todos[todos.length - 1];
+      
+      let [ano, mes] = primeiro.split('-').map(Number);
+      const [anoFim, mesFim] = ultimo.split('-').map(Number);
+      
+      while (ano < anoFim || (ano === anoFim && mes <= mesFim)) {
+        const comp = `${ano}-${String(mes).padStart(2, '0')}`;
+        if (!todos.includes(comp)) {
+          lacunas.push(comp);
+        }
+        mes++;
+        if (mes > 12) { mes = 1; ano++; }
+      }
+      return lacunas;
+    };
+    
+    const lacunas = detectarLacunas(mesesExistentes, mesesNovos);
+    setLacunasDetectadas(lacunas);
+    if (lacunas.length > 0) {
+      console.log('[IMPORT] Lacunas detectadas:', lacunas);
+    }
+    
     setEtapa('preview');
   };
 
@@ -623,6 +679,10 @@ function ImportacaoPage({ onNavigate }) {
     setShowModalCnpj(false);
     setCnpjManual('');
     setErroCnpj('');
+    // Reset de lacunas
+    setMesesExistentes([]);
+    setLacunasDetectadas([]);
+    setShowModalLacunas(false);
     // Reset da revisão
     setArquivoSelecionado(null);
     setDadosRevisao(null);
@@ -1486,16 +1546,106 @@ function ImportacaoPage({ onNavigate }) {
           </Card>
         )}
 
+        {/* Aviso de lacunas de meses */}
+        {lacunasDetectadas.length > 0 && (
+          <div className="mb-4 p-4 bg-amber-50 border-l-4 border-amber-400 rounded-lg">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="w-6 h-6 text-amber-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <h4 className="font-semibold text-amber-800">
+                  {lacunasDetectadas.length === 1 ? '1 mês faltando' : `${lacunasDetectadas.length} meses faltando`} na sequência
+                </h4>
+                <p className="text-sm text-amber-700 mt-1">
+                  {empresaExistente ? 'Considerando os meses já importados e os novos, há lacunas:' : 'Há lacunas entre os meses sendo importados:'}
+                </p>
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {lacunasDetectadas.slice(0, 12).map(comp => {
+                    const [a, m] = comp.split('-');
+                    const meses = ['', 'jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+                    return (
+                      <span key={comp} className="px-2 py-0.5 bg-amber-200 text-amber-800 rounded text-xs font-medium">
+                        {meses[parseInt(m)]}/{a}
+                      </span>
+                    );
+                  })}
+                  {lacunasDetectadas.length > 12 && (
+                    <span className="text-xs text-amber-600">+{lacunasDetectadas.length - 12} mais</span>
+                  )}
+                </div>
+                <p className="text-xs text-amber-600 mt-2">
+                  Dados com lacunas podem afetar a precisão das análises e projeções.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Botões */}
         <div className="flex justify-end gap-3">
           <Button variant="secondary" onClick={resetar}>Cancelar</Button>
           {sucessos.length > 0 && (
-            <Button onClick={() => confirmarImportacao(null)} loading={loading}>
+            <Button onClick={() => {
+              if (lacunasDetectadas.length > 0) {
+                setShowModalLacunas(true);
+              } else {
+                confirmarImportacao(null);
+              }
+            }} loading={loading}>
               <CheckCircle className="w-4 h-4" />
               {empresaExistente ? `Adicionar ${sucessos.length} meses` : `Criar Empresa e Importar`}
             </Button>
           )}
         </div>
+
+        {/* Modal de confirmação de lacunas */}
+        {showModalLacunas && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6">
+              <div className="text-center mb-4">
+                <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <AlertTriangle className="w-8 h-8 text-amber-600" />
+                </div>
+                <h3 className="text-lg font-bold text-slate-800 mb-2">
+                  Meses faltando na sequência
+                </h3>
+                <p className="text-sm text-slate-600">
+                  {lacunasDetectadas.length === 1
+                    ? 'Existe 1 mês faltando entre os dados:'
+                    : `Existem ${lacunasDetectadas.length} meses faltando entre os dados:`
+                  }
+                </p>
+              </div>
+
+              <div className="flex flex-wrap gap-1.5 justify-center mb-4">
+                {lacunasDetectadas.slice(0, 12).map(comp => {
+                  const [a, m] = comp.split('-');
+                  const meses = ['', 'jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+                  return (
+                    <span key={comp} className="px-2.5 py-1 bg-amber-100 text-amber-800 rounded-lg text-sm font-medium">
+                      {meses[parseInt(m)]}/{a}
+                    </span>
+                  );
+                })}
+                {lacunasDetectadas.length > 12 && (
+                  <span className="text-xs text-amber-600 self-center">+{lacunasDetectadas.length - 12} mais</span>
+                )}
+              </div>
+
+              <p className="text-xs text-slate-500 text-center mb-6">
+                Você pode importar os meses faltantes depois, mas análises e projeções podem ser menos precisas.
+              </p>
+
+              <div className="flex gap-3">
+                <Button variant="secondary" className="flex-1" onClick={() => setShowModalLacunas(false)}>
+                  Cancelar
+                </Button>
+                <Button className="flex-1" onClick={() => { setShowModalLacunas(false); confirmarImportacao(null); }}>
+                  Importar mesmo assim
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Modal de CNPJ não encontrado */}
         {showModalCnpj && (
