@@ -2,13 +2,11 @@ import VisaoGeralTab from './components/VisaoGeralTab';
 import DadosTab from './components/DadosTab';
 import AnaliseDetail from './components/AnaliseDetail';
 import HistoricoTab from './components/HistoricoTab';
-import UploadModal from './components/UploadModal';
 import RegistroModal from './components/RegistroModal';
 import EditEmpresaModal from './components/EditEmpresaModal';
 import React, { useState, useEffect } from 'react';
-import { AlertTriangle, ArrowLeft, ChevronDown, Download, FileText, PieChart as PieChartIcon, Trash2, Upload, BarChart3 } from 'lucide-react';
-import { BarChart } from 'recharts';
-import { Button, Card, EmptyState, LoadingOverlay, LoadingScreen, Modal, ScoreCircle, StatusBadge } from '../../components/ui';
+import { AlertTriangle, ArrowLeft, ChevronDown, Download, FileText, PieChart as PieChartIcon, Trash2, BarChart3 } from 'lucide-react';
+import { Button, Card, EmptyState, LoadingScreen, Modal, ScoreCircle, StatusBadge } from '../../components/ui';
 import { Header } from '../../components/layout';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
@@ -24,19 +22,17 @@ function EmpresaDetailPage({ empresaId, onNavigate }) {
   const [analises, setAnalises] = useState([]);
   const [ultimaAnalise, setUltimaAnalise] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [showUpload, setShowUpload] = useState(false);
   const [showRegistro, setShowRegistro] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [alertasEmpresa, setAlertasEmpresa] = useState([]);
   const [tab, setTab] = useState('visao-geral');
 
-  // Recarregar dados sempre que a página for acessada (não apenas quando empresaId muda)
   useEffect(() => { 
     loadData(); 
   }, [empresaId]);
   
-  // Também recarregar quando o usuário volta para esta página (foco na janela)
   useEffect(() => {
     const handleFocus = () => {
       console.log('[EMPRESA] Janela ganhou foco, recarregando dados...');
@@ -51,10 +47,11 @@ function EmpresaDetailPage({ empresaId, onNavigate }) {
     setLoading(true);
     console.log('[EMPRESA] Carregando dados da empresa', empresaId);
     try {
-      const [empRes, regRes, anaRes] = await Promise.all([
+      const [empRes, regRes, anaRes, alertasRes] = await Promise.all([
         api(`/empresas/${empresaId}`),
         api(`/empresas/${empresaId}/dados`),
-        api(`/empresas/${empresaId}/analises`)
+        api(`/empresas/${empresaId}/analises`),
+        api(`/alertas?empresa_id=${empresaId}&apenas_nao_resolvidos=true&limite=10`)
       ]);
       
       if (empRes.ok) {
@@ -71,6 +68,10 @@ function EmpresaDetailPage({ empresaId, onNavigate }) {
         setAnalises(analisesList);
         if (analisesList.length > 0) setUltimaAnalise(analisesList[0]);
       }
+      if (alertasRes.ok) {
+        const alertasData = await alertasRes.json();
+        setAlertasEmpresa(alertasData.alertas || alertasData || []);
+      }
     } catch (err) {
       toast.error('Erro ao carregar dados da empresa');
     } finally {
@@ -78,12 +79,9 @@ function EmpresaDetailPage({ empresaId, onNavigate }) {
     }
   };
   
-  // Callback quando importação é bem sucedida
   const handleImportSuccess = () => {
     loadData();
   };
-
-
 
   const exportarPDF = (comParecer = false) => {
     if (!ultimaAnalise) return;
@@ -129,7 +127,6 @@ function EmpresaDetailPage({ empresaId, onNavigate }) {
         actions={
           <div className="flex items-center gap-2 flex-wrap">
             <Button variant="ghost" size="sm" onClick={() => onNavigate('empresas')}><ArrowLeft className="w-4 h-4" /> <span className="hidden sm:inline">Voltar</span></Button>
-            <Button variant="secondary" size="sm" onClick={() => setShowUpload(true)}><Upload className="w-4 h-4" /> <span className="hidden sm:inline">Importar</span><span className="sm:hidden">Importar</span></Button>
             <Button 
               variant="secondary" 
               size="sm"
@@ -209,8 +206,8 @@ function EmpresaDetailPage({ empresaId, onNavigate }) {
         </nav>
       </div>
       
-      {tab === 'visao-geral' && <VisaoGeralTab empresa={empresa} registros={registros} onEdit={() => setShowEdit(true)} onDelete={() => setShowDeleteConfirm(true)} />}
-      {tab === 'dados' && <DadosTab registros={registros} onAddManual={() => setShowRegistro(true)} onUpload={() => setShowUpload(true)} />}
+      {tab === 'visao-geral' && <VisaoGeralTab empresa={empresa} registros={registros} ultimaAnalise={ultimaAnalise} alertas={alertasEmpresa} onEdit={() => setShowEdit(true)} onDelete={() => setShowDeleteConfirm(true)} onNavigate={onNavigate} />}
+      {tab === 'dados' && <DadosTab registros={registros} onAddManual={() => setShowRegistro(true)} onNavigate={onNavigate} />}
       {tab === 'analise' && ultimaAnalise && <AnaliseDetail analise={ultimaAnalise} />}
       {tab === 'analise' && !ultimaAnalise && (
         <Card className="p-8">
@@ -221,11 +218,9 @@ function EmpresaDetailPage({ empresaId, onNavigate }) {
       )}
       {tab === 'historico' && <HistoricoTab analises={analises} />}
       
-      <UploadModal isOpen={showUpload} onClose={() => setShowUpload(false)} empresaId={empresaId} onSuccess={handleImportSuccess} registrosExistentes={registros} />
       <RegistroModal isOpen={showRegistro} onClose={() => setShowRegistro(false)} empresaId={empresaId} onSuccess={handleImportSuccess} />
       <EditEmpresaModal isOpen={showEdit} onClose={() => setShowEdit(false)} empresa={empresa} onSuccess={() => { setShowEdit(false); loadData(); }} />
       
-      {/* Modal de confirmação de exclusão */}
       <Modal isOpen={showDeleteConfirm} onClose={() => setShowDeleteConfirm(false)} title="Excluir Empresa">
         <div className="space-y-4">
           <div className="flex items-start gap-3 p-4 bg-red-50 rounded-lg">

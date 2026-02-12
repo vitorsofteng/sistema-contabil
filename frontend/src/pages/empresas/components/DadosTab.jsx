@@ -2,7 +2,7 @@ import React from 'react';
 import { FileSpreadsheet, Plus, Upload } from 'lucide-react';
 import { Button, Card, EmptyState } from '../../../components/ui';
 
-function DadosTab({ registros, onAddManual, onUpload }) {
+function DadosTab({ registros, onAddManual, onNavigate }) {
   const formatMoney = (v) => {
     if (v === null || v === undefined) return '—';
     return `R$ ${Number(v).toLocaleString('pt-BR', {minimumFractionDigits: 0, maximumFractionDigits: 0})}`;
@@ -29,7 +29,6 @@ function DadosTab({ registros, onAddManual, onUpload }) {
         <h3 className="font-semibold text-slate-900">Dados Mensais</h3>
         <div className="flex gap-2">
           <Button variant="secondary" size="sm" onClick={onAddManual}><Plus className="w-4 h-4" /> Adicionar Manual</Button>
-          <Button variant="secondary" size="sm" onClick={onUpload}><Upload className="w-4 h-4" /> Importar CSV</Button>
         </div>
       </div>
       {registros.length > 0 ? (
@@ -59,8 +58,8 @@ function DadosTab({ registros, onAddManual, onUpload }) {
           </table>
         </div>
       ) : (
-        <EmptyState icon={FileSpreadsheet} title="Nenhum dado cadastrado" description="Importe um CSV ou adicione manualmente"
-          action={<Button onClick={onUpload}><Upload className="w-4 h-4" /> Importar Dados</Button>} />
+        <EmptyState icon={FileSpreadsheet} title="Nenhum dado cadastrado" description="Use a aba Importação para importar dados ou adicione manualmente"
+          action={<Button onClick={() => onNavigate('importacao')}><Upload className="w-4 h-4" /> Ir para Importação</Button>} />
       )}
     </Card>
   );

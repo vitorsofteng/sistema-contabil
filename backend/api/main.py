@@ -1760,6 +1760,8 @@ async def lista_dados(id: int, user: Dict = Depends(get_user)):
         
         dados.append({
             'id': d.get('id'),
+            'ano': d.get('ano'),
+            'mes': d.get('mes'),
             'competencia': f"{d['ano']}-{d['mes']:02d}",
             'receita_bruta': receita,
             'custos': custos,
@@ -1768,7 +1770,16 @@ async def lista_dados(id: int, user: Dict = Depends(get_user)):
             'folha_pagamento': folha,
             'saldo_caixa': caixa,
             'lucro_liquido': lucro_liq,
-            'margem_liquida': margem
+            'margem_liquida': margem,
+            # Balanço (pode ser None)
+            'ativo_total': d.get('ativo_total'),
+            'ativo_circulante': d.get('ativo_circulante'),
+            'passivo_total': d.get('passivo_total'),
+            'passivo_circulante': d.get('passivo_circulante'),
+            'passivo_nao_circulante': d.get('passivo_nao_circulante'),
+            'patrimonio_liquido': d.get('patrimonio_liquido'),
+            # Metadata
+            'updated_at': d.get('updated_at'),
         })
     
     logger.debug(f"[API] Dados formatados para frontend: {dados}")
