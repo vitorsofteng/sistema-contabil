@@ -69,22 +69,31 @@ function AuthBranding() {
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-6">
-            <div className="text-center">
-              <div className="text-2xl font-bold text-emerald-400">✓</div>
-              <div className="text-slate-400 text-xs">Gratuito</div>
+        <div>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-6">
+              <div className="text-center">
+                <div className="text-2xl font-bold text-emerald-400">✓</div>
+                <div className="text-slate-400 text-xs">Gratuito</div>
+              </div>
+              <div className="w-px h-8 bg-slate-700"></div>
+              <div className="text-center">
+                <div className="text-2xl font-bold text-emerald-400">✓</div>
+                <div className="text-slate-400 text-xs">Sem cartão</div>
+              </div>
+              <div className="w-px h-8 bg-slate-700"></div>
+              <div className="text-center">
+                <div className="text-2xl font-bold text-emerald-400">✓</div>
+                <div className="text-slate-400 text-xs">Fácil de usar</div>
+              </div>
             </div>
-            <div className="w-px h-8 bg-slate-700"></div>
-            <div className="text-center">
-              <div className="text-2xl font-bold text-emerald-400">✓</div>
-              <div className="text-slate-400 text-xs">Sem cartão</div>
-            </div>
-            <div className="w-px h-8 bg-slate-700"></div>
-            <div className="text-center">
-              <div className="text-2xl font-bold text-emerald-400">✓</div>
-              <div className="text-slate-400 text-xs">Fácil de usar</div>
-            </div>
+          </div>
+          <div className="flex items-center gap-3 mt-4 text-xs text-slate-500">
+            <a href="#termos" className="hover:text-slate-300 transition-colors">Termos de Uso</a>
+            <span>·</span>
+            <a href="#privacidade" className="hover:text-slate-300 transition-colors">Privacidade</a>
+            <span>·</span>
+            <a href="#cookies" className="hover:text-slate-300 transition-colors">Cookies</a>
           </div>
         </div>
       </div>

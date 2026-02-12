@@ -162,6 +162,13 @@ function LoginPage({ onToggle, onForgot }) {
                 <span>Acesso seguro</span>
               </div>
             </div>
+            <div className="flex items-center justify-center gap-3 mt-4 text-xs text-slate-400">
+              <a href="#termos" className="hover:text-emerald-600 transition-colors">Termos de Uso</a>
+              <span>·</span>
+              <a href="#privacidade" className="hover:text-emerald-600 transition-colors">Privacidade</a>
+              <span>·</span>
+              <a href="#cookies" className="hover:text-emerald-600 transition-colors">Cookies</a>
+            </div>
           </div>
         </div>
       </div>

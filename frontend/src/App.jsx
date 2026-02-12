@@ -19,6 +19,7 @@ import { ImportacaoPage } from './pages/importacao';
 import { RelatoriosPage } from './pages/relatorios';
 import { AlertasPage } from './pages/alertas';
 import { AnaliseFinanceiraPage } from './pages/analise';
+import { TermosPage, PrivacidadePage, CookiesPage } from './pages/legal';
 
 // Config
 import { API_URL } from './config/api';
@@ -34,6 +35,22 @@ function AppContent() {
   
   const [emailVerifying, setEmailVerifying] = useState(false);
   const [emailVerifyResult, setEmailVerifyResult] = useState(null);
+  const [legalPage, setLegalPage] = useState(null);
+
+  // Detectar página legal na URL (hash: #termos, #privacidade, #cookies)
+  useEffect(() => {
+    const handleHash = () => {
+      const hash = window.location.hash.replace('#', '');
+      if (['termos', 'privacidade', 'cookies'].includes(hash)) {
+        setLegalPage(hash);
+      } else {
+        setLegalPage(null);
+      }
+    };
+    handleHash();
+    window.addEventListener('hashchange', handleHash);
+    return () => window.removeEventListener('hashchange', handleHash);
+  }, []);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -66,6 +83,29 @@ function AppContent() {
       // AuthPages vai pegar o param
     }
   }, []);
+
+  // Páginas legais (acessíveis sem login)
+  if (legalPage) {
+    const legalNav = (page) => {
+      window.location.hash = page;
+      setLegalPage(page);
+    };
+    const legalBack = () => {
+      window.location.hash = '';
+      setLegalPage(null);
+    };
+
+    switch (legalPage) {
+      case 'termos':
+        return <TermosPage onBack={legalBack} onNavigate={legalNav} />;
+      case 'privacidade':
+        return <PrivacidadePage onBack={legalBack} onNavigate={legalNav} />;
+      case 'cookies':
+        return <CookiesPage onBack={legalBack} onNavigate={legalNav} />;
+      default:
+        break;
+    }
+  }
 
   // Tela de verificação de email
   if (emailVerifying || emailVerifyResult) {

@@ -432,9 +432,9 @@ function RegisterPage({ onToggle }) {
 
           <p className="mt-4 text-center text-xs text-slate-400">
             Ao criar uma conta, você concorda com nossos{' '}
-            <a href="#" className="text-emerald-600 hover:underline">Termos de Uso</a>
+            <a href="#termos" className="text-emerald-600 hover:underline">Termos de Uso</a>
             {' '}e{' '}
-            <a href="#" className="text-emerald-600 hover:underline">Política de Privacidade</a>
+            <a href="#privacidade" className="text-emerald-600 hover:underline">Política de Privacidade</a>
           </p>
         </div>
       </div>

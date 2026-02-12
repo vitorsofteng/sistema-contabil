@@ -120,6 +120,13 @@ function Sidebar({ currentPage, onNavigate, collapsed, onToggle, mobileOpen, onM
             <p className="text-xs text-white/60 truncate">{user?.email}</p>
           </div>
         )}
+        {(isMobile || !collapsed) && (
+          <div className="flex items-center gap-2 px-3 mb-2 text-[10px] text-white/40">
+            <a href="#termos" className="hover:text-white/70 transition-colors">Termos</a>
+            <span>·</span>
+            <a href="#privacidade" className="hover:text-white/70 transition-colors">Privacidade</a>
+          </div>
+        )}
         <button
           onClick={handleLogout}
           className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-white/70 hover:bg-white/10"
